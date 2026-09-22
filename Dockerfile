@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS source
+1FROM node:22-bookworm-slim AS source
 WORKDIR /work
 
 RUN apt-get update \
@@ -44,3 +44,5 @@ ENV PORT=8000
 EXPOSE 8000
 
 CMD ["sh", "-c", "python -m uvicorn backend.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+
+COPY rhythm-core-v0.3.1-youtube-input.zip /tmp/app.zip
