@@ -1,0 +1,71 @@
+name: Build Android Companion APK Fix3 WAV
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack Android Companion
+        run: |
+          rm -rf android-build
+          mkdir -p android-build
+          unzip -q rhythm-lab-android-companion-v0.4-mvp.zip -d android-build
+
+      - name: Patch Kotlin compile error
+        run: |
+          FILE="android-build/android-companion/app/src/main/java/com/rhythmlab/companion/RhythmApi.kt"
+
+          sed -i '/RequestBody.Companion.toRequestBody/d' "$FILE"
+
+          sed -i 's/difficulty.lowercase().toRequestBody()/difficulty.lowercase()/g' "$FILE"
+          sed -i 's/seed.toString().toRequestBody()/seed.toString()/g' "$FILE"
+
+      - name: Patch YouTube audio output to WAV
+        run: |
+          FILE="android-build/android-companion/app/src/main/java/com/rhythmlab/companion/YoutubeEngine.kt"
+
+          sed -i 's/bestaudio\[ext=m4a\]\/bestaudio\/best/bestaudio\/best/g' "$FILE"
+          sed -i 's/addOption("--audio-format", "m4a")/addOption("--audio-format", "wav")/g' "$FILE"
+
+          echo "=== Patched YoutubeEngine.kt ==="
+          grep -n "bestaudio\|audio-format" "$FILE"
+
+      - name: Patch upload MIME type
+        run: |
+          FILE="android-build/android-companion/app/src/main/java/com/rhythmlab/companion/RhythmApi.kt"
+
+          sed -i 's/"audio\/mp4"/"audio\/wav"/g' "$FILE"
+
+          echo "=== Patched RhythmApi.kt ==="
+          grep -n "audio/wav\|difficulty\|seed" "$FILE"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          SDKMANAGER="$(find "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build APK
+        working-directory: android-build/android-companion
+        run: gradle :app:assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rhythm-lab-companion-fix3-wav
+          path: android-build/android-companion/app/build/outputs/apk/debug/app-debug.apk
