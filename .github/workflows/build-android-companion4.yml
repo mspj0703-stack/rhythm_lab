@@ -1,4 +1,4 @@
-name: Build Android Companion APK Fix4 22k Mono
+name: Build Android Companion signed APK
 
 on:
   workflow_dispatch:
@@ -15,86 +15,6 @@ jobs:
           rm -rf android-build
           mkdir -p android-build
           unzip -q rhythm-lab-android-companion-v0.4-mvp.zip -d android-build
-
-      - name: Patch Android source for 22.05kHz mono WAV
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          root = Path(
-              "android-build/android-companion/app/src/main/java/"
-              "com/rhythmlab/companion"
-          )
-
-          # ---- RhythmApi.kt ----
-          api = root / "RhythmApi.kt"
-          s = api.read_text()
-
-          s = s.replace(
-              "import okhttp3.RequestBody.Companion.toRequestBody\n",
-              ""
-          )
-
-          s = s.replace(
-              "difficulty.lowercase().toRequestBody()",
-              "difficulty.lowercase()"
-          )
-
-          s = s.replace(
-              "seed.toString().toRequestBody()",
-              "seed.toString()"
-          )
-
-          s = s.replace(
-              '"audio/mp4".toMediaType()',
-              '"audio/wav".toMediaType()'
-          )
-
-          api.write_text(s)
-
-          # ---- YoutubeEngine.kt ----
-          yt = root / "YoutubeEngine.kt"
-          s = yt.read_text()
-
-          s = s.replace(
-              'addOption("-f", "bestaudio[ext=m4a]/bestaudio/best")',
-              'addOption("-f", "bestaudio/best")'
-          )
-
-          s = s.replace(
-              'addOption("--audio-format", "m4a")',
-              'addOption("--audio-format", "wav")'
-          )
-
-          marker = '            addOption("--audio-format", "wav")'
-
-          downsample = (
-              '            addOption('
-              '"--postprocessor-args", '
-              '"ExtractAudio+ffmpeg_o:-ac 1 -ar 22050 -c:a pcm_s16le"'
-              ')'
-          )
-
-          if downsample not in s:
-              if marker not in s:
-                  raise SystemExit("audio-format line not found")
-
-              s = s.replace(
-                  marker,
-                  marker + "\n" + downsample
-              )
-
-          yt.write_text(s)
-          PY
-
-          echo "=== YoutubeEngine.kt ==="
-          grep -n "bestaudio\|audio-format\|postprocessor-args" \
-            android-build/android-companion/app/src/main/java/com/rhythmlab/companion/YoutubeEngine.kt
-
-          echo "=== RhythmApi.kt ==="
-          grep -n "audio/wav\|difficulty\|seed" \
-            android-build/android-companion/app/src/main/java/com/rhythmlab/companion/RhythmApi.kt
 
       - uses: actions/setup-java@v4
         with:
@@ -119,11 +39,33 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build APK
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.COMPANION_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing COMPANION_KEYSTORE_BASE64 secret'; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo 'Missing COMPANION_KEYSTORE_PASSWORD secret'; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/companion.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/companion.p12" \
+            -storepass "$KEYSTORE_PASSWORD" -alias companion >/dev/null
+
+      - name: Build signed APK
         working-directory: android-build/android-companion
-        run: gradle :app:assembleDebug --stacktrace
+        env:
+          COMPANION_KEYSTORE_PATH: ${{ runner.temp }}/companion.p12
+          COMPANION_KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify signature and version
+        shell: bash
+        run: |
+          APK=android-build/android-companion/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rhythm-lab-companion-fix4-22k-mono
-          path: android-build/android-companion/app/build/outputs/apk/debug/app-debug.apk
+          name: rhythm-lab-companion-signed
+          path: android-build/android-companion/app/build/outputs/apk/release/app-release.apk
