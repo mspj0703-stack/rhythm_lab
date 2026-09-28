@@ -1,0 +1,265 @@
+name: Build Android Companion v0.5.1 YouTube 403 Hotfix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Unpack current Android Companion source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf android-build
+          mkdir -p android-build
+          unzip -q rhythm-lab-android-companion-v0.4-mvp.zip -d android-build
+
+      - name: Apply v0.5.1 YouTube 403 hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="android-build/android-companion/app/src/main/java/com/rhythmlab/companion/YoutubeEngine.kt"
+
+          cat > "$FILE" <<'KOTLIN'
+          package com.rhythmlab.companion
+
+          import android.content.Context
+          import com.yausername.ffmpeg.FFmpeg
+          import com.yausername.youtubedl_android.YoutubeDL
+          import com.yausername.youtubedl_android.YoutubeDLRequest
+          import java.io.File
+
+          object YoutubeEngine {
+              private var initialized = false
+
+              private data class YoutubeStrategy(
+                  val label: String,
+                  val extractorArgs: String?,
+              )
+
+              private val youtubeStrategies = listOf(
+                  YoutubeStrategy("Android", "youtube:player_client=android"),
+                  YoutubeStrategy("Web embedded", "youtube:player_client=default,web_embedded"),
+                  YoutubeStrategy("기본", null),
+              )
+
+              @Synchronized
+              fun ensureInitialized(context: Context, status: (String) -> Unit) {
+                  if (initialized) return
+                  status("yt-dlp 엔진 초기화 중…")
+                  YoutubeDL.getInstance().init(context.applicationContext)
+                  FFmpeg.getInstance().init(context.applicationContext)
+                  initialized = true
+
+                  runCatching {
+                      status("yt-dlp 최신 버전 확인 중…")
+                      YoutubeDL.getInstance().updateYoutubeDL(
+                          context.applicationContext,
+                          YoutubeDL.UpdateChannel.NIGHTLY,
+                      )
+                  }
+              }
+
+              private fun buildRequest(url: String, dir: File, extractorArgs: String?): YoutubeDLRequest =
+                  YoutubeDLRequest(url).apply {
+                      addOption("--no-playlist")
+                      addOption("--no-warnings")
+                      addOption("--match-filter", "duration <= 480")
+                      addOption("--max-filesize", "80M")
+                      if (extractorArgs != null) {
+                          addOption("--extractor-args", extractorArgs)
+                      }
+                      addOption("-f", "bestaudio/best")
+                      addOption("-x")
+                      addOption("--audio-format", "wav")
+                      addOption("--postprocessor-args", "ExtractAudio+ffmpeg_o:-ac 1 -ar 22050 -c:a pcm_s16le")
+                      addOption("--audio-quality", "5")
+                      addOption("--no-mtime")
+                      addOption("-o", File(dir, "source.%(ext)s").absolutePath)
+                  }
+
+              private fun clearExtractionDir(dir: File) {
+                  dir.mkdirs()
+                  dir.listFiles()?.forEach { it.deleteRecursively() }
+              }
+
+              fun extractAudio(
+                  context: Context,
+                  url: String,
+                  onProgress: (Int, String) -> Unit,
+              ): File {
+                  ensureInitialized(context) { onProgress(1, it) }
+
+                  val dir = File(context.cacheDir, "rhythm_extract")
+                  var lastError: Exception? = null
+
+                  for ((attemptIndex, strategy) in youtubeStrategies.withIndex()) {
+                      clearExtractionDir(dir)
+                      if (attemptIndex > 0) {
+                          onProgress(0, "YouTube 접근 재시도 중… · ${strategy.label}")
+                      }
+
+                      try {
+                          val request = buildRequest(url, dir, strategy.extractorArgs)
+                          val processId = "rhythm-lab-${System.currentTimeMillis()}-$attemptIndex"
+
+                          YoutubeDL.getInstance().execute(request, processId) { progress, eta, line ->
+                              val p = progress.toInt().coerceIn(0, 100)
+                              val suffix = if (eta > 0) " · ${eta}s 남음" else ""
+                              val phase = when {
+                                  line.contains("ExtractAudio", ignoreCase = true) -> "오디오 변환 중…"
+                                  p > 0 -> "YouTube에서 오디오 받는 중 $p%$suffix"
+                                  else -> "YouTube 정보 확인 중…"
+                              }
+                              onProgress(p.coerceAtMost(95), phase)
+                          }
+
+                          val result = dir.listFiles()
+                              ?.filter { it.isFile && it.length() > 0 }
+                              ?.maxByOrNull { it.lastModified() }
+
+                          if (result != null) {
+                              onProgress(100, "오디오 준비 완료")
+                              return result
+                          }
+
+                          lastError = IllegalStateException("추출된 오디오 파일을 찾지 못했습니다.")
+                      } catch (e: Exception) {
+                          lastError = e
+                      }
+                  }
+
+                  val detail = lastError?.message
+                      ?.lineSequence()
+                      ?.lastOrNull { it.isNotBlank() }
+                      ?.take(180)
+                      ?.let { " ($it)" }
+                      .orEmpty()
+                  error("YouTube 오디오를 가져오지 못했습니다. 잠시 후 다시 시도하거나 다른 영상을 사용해 주세요.$detail")
+              }
+          }
+          KOTLIN
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("android-build/android-companion/app/build.gradle.kts")
+          text = path.read_text()
+          text, code_count = re.subn(r'versionCode\s*=\s*\d+', 'versionCode = 100006', text, count=1)
+          text, name_count = re.subn(r'versionName\s*=\s*"[^"]+"', 'versionName = "0.5.1"', text, count=1)
+          if code_count != 1 or name_count != 1:
+              raise SystemExit(f"version patch failed: versionCode={code_count}, versionName={name_count}")
+          path.write_text(text)
+          PY
+
+      - name: Verify v0.5.1 hotfix source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android-build/android-companion"
+          SRC="$ROOT/app/src/main/java/com/rhythmlab/companion"
+
+          test -f "$SRC/MainActivity.kt"
+          test -f "$SRC/RhythmApi.kt"
+          test -f "$SRC/YoutubeEngine.kt"
+          test -f "$SRC/PlayActivity.kt"
+          test -f "$SRC/SavedSongStore.kt"
+
+          grep -q 'saved=1' "$SRC/PlayActivity.kt"
+          grep -q '/api/session/' "$SRC/PlayActivity.kt"
+          grep -q '/api/media/' "$SRC/PlayActivity.kt"
+          grep -R -q 'audio/wav' "$SRC"
+          grep -R -q '22050' "$SRC"
+          grep -q 'youtube:player_client=android' "$SRC/YoutubeEngine.kt"
+          grep -q 'youtube:player_client=default,web_embedded' "$SRC/YoutubeEngine.kt"
+          grep -q 'YouTube 접근 재시도 중' "$SRC/YoutubeEngine.kt"
+          grep -q 'versionName = "0.5.1"' "$ROOT/app/build.gradle.kts"
+
+          echo "Android Companion v0.5.1 YouTube 403 hotfix checks passed."
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$(find "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.COMPANION_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing COMPANION_KEYSTORE_BASE64 secret'; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo 'Missing COMPANION_KEYSTORE_PASSWORD secret'; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/companion.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/companion.p12" -storepass "$KEYSTORE_PASSWORD" -alias companion >/dev/null
+
+      - name: Build signed release APK
+        working-directory: android-build/android-companion
+        env:
+          COMPANION_KEYSTORE_PATH: ${{ runner.temp }}/companion.p12
+          COMPANION_KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify signature and app version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android-build/android-companion/app/build/outputs/apk/release/app-release.apk"
+
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+
+          BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:')"
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='com.rhythmlab.companion'"
+          echo "$BADGING" | grep -q "versionCode='100006'"
+          echo "$BADGING" | grep -q "versionName='0.5.1'"
+
+          cp "$APK" "$RUNNER_TEMP/rhythm-lab-companion-v0.5.1.apk"
+
+      - name: Create canonical v0.5.1 source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf android-build/android-companion/.gradle
+          rm -rf android-build/android-companion/build
+          rm -rf android-build/android-companion/app/build
+          (
+            cd android-build
+            zip -qr "$RUNNER_TEMP/rhythm-lab-android-companion-v0.5.1-source.zip" android-companion
+          )
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: rhythm-lab-companion-v0.5.1-signed
+          path: ${{ runner.temp }}/rhythm-lab-companion-v0.5.1.apk
+          retention-days: 30
+
+      - name: Upload canonical native source
+        uses: actions/upload-artifact@v5
+        with:
+          name: rhythm-lab-android-companion-v0.5.1-source
+          path: ${{ runner.temp }}/rhythm-lab-android-companion-v0.5.1-source.zip
+          retention-days: 30
