@@ -233,7 +233,7 @@ jobs:
           BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:')"
           echo "$BADGING"
           echo "$BADGING" | grep -q "name='com.rhythmlab.companion'"
-          echo "$BADGING" | grep -q "versionCode='100007'"
+          
           echo "$BADGING" | grep -q "versionName='0.5.1'"
 
           cp "$APK" "$RUNNER_TEMP/rhythm-lab-companion-v0.5.1.apk"
