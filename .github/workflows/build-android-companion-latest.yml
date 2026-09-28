@@ -1,0 +1,129 @@
+name: Build Android Companion latest signed APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Unpack current Android Companion source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf android-build
+          mkdir -p android-build
+          unzip -q rhythm-lab-android-companion-v0.4-mvp.zip -d android-build
+
+      - name: Verify native v0.5 source features
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android-build/android-companion"
+          SRC="$ROOT/app/src/main/java/com/rhythmlab/companion"
+
+          test -f "$SRC/MainActivity.kt"
+          test -f "$SRC/RhythmApi.kt"
+          test -f "$SRC/YoutubeEngine.kt"
+          test -f "$SRC/PlayActivity.kt"
+          test -f "$SRC/SavedSongStore.kt"
+
+          grep -q 'saved=1' "$SRC/PlayActivity.kt"
+          grep -q '/api/session/' "$SRC/PlayActivity.kt"
+          grep -q '/api/media/' "$SRC/PlayActivity.kt"
+          grep -R -q 'audio/wav' "$SRC"
+          grep -R -q '22050' "$SRC"
+          grep -R -q 'web-production-e18dd.up.railway.app' "$SRC"
+
+          echo "Android Companion native v0.5 feature checks passed."
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$(find "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools" \
+            -type f -name sdkmanager | head -n 1)"
+
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.COMPANION_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing COMPANION_KEYSTORE_BASE64 secret'; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo 'Missing COMPANION_KEYSTORE_PASSWORD secret'; exit 1; }
+
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/companion.p12"
+
+          keytool -list \
+            -storetype PKCS12 \
+            -keystore "$RUNNER_TEMP/companion.p12" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias companion >/dev/null
+
+      - name: Build signed release APK
+        working-directory: android-build/android-companion
+        env:
+          COMPANION_KEYSTORE_PATH: ${{ runner.temp }}/companion.p12
+          COMPANION_KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify signature and app version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android-build/android-companion/app/build/outputs/apk/release/app-release.apk"
+
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+
+          BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:')"
+          echo "$BADGING"
+
+          echo "$BADGING" | grep -q "name='com.rhythmlab.companion'"
+          echo "$BADGING" | grep -q "versionName='0.5.0'"
+
+      - name: Create canonical v0.5 source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd android-build
+            zip -qr "$RUNNER_TEMP/rhythm-lab-android-companion-v0.5.0-source.zip" android-companion
+          )
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: rhythm-lab-companion-v0.5.0-signed
+          path: android-build/android-companion/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+      - name: Upload canonical native source
+        uses: actions/upload-artifact@v5
+        with:
+          name: rhythm-lab-android-companion-v0.5.0-source
+          path: ${{ runner.temp }}/rhythm-lab-android-companion-v0.5.0-source.zip
+          retention-days: 30
