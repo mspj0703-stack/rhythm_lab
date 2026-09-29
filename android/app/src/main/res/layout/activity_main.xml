@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#08070D"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="BEATDASH"
+            android:textColor="#A78BFA"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="YouTube 링크로\n채보 만들고 플레이"
+            android:textColor="#FFFFFF"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="YouTube 앱에서 공유할 수도 있어요. 생성된 채보와 영상은 이 기기에 저장됩니다."
+            android:textColor="#A7A3B3"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/urlInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:backgroundTint="#7C5CE5"
+            android:hint="https://youtu.be/..."
+            android:inputType="textUri"
+            android:singleLine="true"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#716B7D" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="난이도"
+            android:textColor="#C4BFCE"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/difficultySpinner"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="6dp"
+            android:backgroundTint="#8B5CF6" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Pattern seed"
+            android:textColor="#C4BFCE"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/seedInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="numberSigned"
+            android:text="42"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="26dp"
+            android:text="영상 준비 → AI 채보 생성"
+            android:textAllCaps="false"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="10dp"
+            android:layout_marginTop="22dp"
+            android:max="100"
+            android:progress="0" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="대기 중"
+            android:textColor="#C4BFCE"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/openWebButton"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="16dp"
+            android:text="앱에서 플레이"
+            android:textAllCaps="false"
+            android:visibility="gone" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="저장한 곡"
+            android:textColor="#FFFFFF"
+            android:textSize="21sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/savedSongs"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:text="MVP 제한: 공개 YouTube 영상만 대상으로 하며, 연령 제한·지역 제한·DRM 영상은 실패할 수 있습니다."
+            android:textColor="#696473"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+</ScrollView>

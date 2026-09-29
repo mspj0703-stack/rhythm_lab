@@ -1,0 +1,170 @@
+{
+ "title": "Synthetic accent",
+ "artist": "",
+ "bpm": 129.2,
+ "offset": 0,
+ "difficulty": "Easy",
+ "level": 3,
+ "notes": [
+  {
+   "time": 1.003,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 1.467,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 1.943,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 2.408,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 2.872,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 3.348,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 3.813,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 4.277,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 4.753,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 5.217,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 5.693,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 6.158,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 6.622,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 7.098,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 7.563,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 8.027,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 8.503,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 8.967,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 9.443,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 9.908,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 10.372,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 10.848,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 11.313,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 11.777,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 12.253,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 12.717,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 13.182,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 13.658,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 14.122,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 14.598,
+   "lane": 1,
+   "type": "tap"
+  },
+  {
+   "time": 15.063,
+   "lane": 2,
+   "type": "tap"
+  },
+  {
+   "time": 15.527,
+   "lane": 1,
+   "type": "tap"
+  }
+ ]
+}

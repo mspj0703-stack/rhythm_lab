@@ -1,0 +1,57 @@
+name: Build BEATDASH Android signed APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-android.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" </dev/null
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.COMPANION_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing COMPANION_KEYSTORE_BASE64 secret'; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo 'Missing COMPANION_KEYSTORE_PASSWORD secret'; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/companion.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/companion.p12" \
+            -storepass "$KEYSTORE_PASSWORD" -alias companion >/dev/null
+      - name: Test byte ranges
+        working-directory: android
+        run: |
+          javac -d "$RUNNER_TEMP/range-tests" app/src/main/java/com/rhythmlab/companion/ByteRange.java tests/ByteRangeTest.java
+          java -cp "$RUNNER_TEMP/range-tests" ByteRangeTest
+      - name: Build signed APK
+        working-directory: android
+        env:
+          COMPANION_KEYSTORE_PATH: ${{ runner.temp }}/companion.p12
+          COMPANION_KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
+      - name: Verify signature and version
+        shell: bash
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beatdash-android-signed
+          path: android/app/build/outputs/apk/release/app-release.apk

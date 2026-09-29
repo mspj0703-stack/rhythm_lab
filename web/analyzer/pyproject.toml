@@ -1,0 +1,16 @@
+[project]
+name = "rhythm-chartgen"
+version = "0.3.0rc1"
+description = "Audio -> 4-key tap chart generator for rhythm-core"
+requires-python = ">=3.10"
+dependencies = ["librosa==0.11.0", "numpy>=1.26,<3", "scipy>=1.11,<2", "soundfile"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,45 @@
+{
+  "name": "rhythm-core",
+  "private": true,
+  "version": "4.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "smoke": "node scripts/browser_smoke_test.cjs",
+    "test:py": "cd analyzer && python3 -m pytest -q",
+    "lint:py": "cd analyzer && python3 -m ruff check .",
+    "gen:fixtures": "python3 analyzer/make_fixtures.py",
+    "gen:chart": "python3 analyzer/generate_chart.py",
+    "eval:real": "python3 analyzer/evaluate_real_songs.py",
+    "compare:reports": "python3 analyzer/compare_reports.py",
+    "stress:py": "python3 analyzer/stress_benchmark.py --out analyzer/stress-output",
+    "score:manual": "python3 analyzer/score_manual_evaluation.py",
+    "api": "python3 -m uvicorn backend.app:app --host 0.0.0.0 --port 8000",
+    "api:dev": "python3 -m uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload",
+    "smoke:v3": "node scripts/v3_browser_review.cjs",
+    "test:media": "python3 scripts/media_pipeline_review.py",
+    "smoke:v4": "node scripts/v4_browser_review.cjs"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/ui": "^5.0.1",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.1.1",
+    "oxlint": "^1.81.0",
+    "puppeteer": "^25.11.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
