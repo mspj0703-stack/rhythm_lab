@@ -1,0 +1,90 @@
+name: Build BEATDASH v3.0 signed APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Unpack BEATDASH v3 Android source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf android-build
+          mkdir -p android-build
+          unzip -q BEATDASH-v3.0-android-reviewed-source.zip -d android-build
+          test -f android-build/android-companion/app/build.gradle.kts
+          grep -q 'versionName = "3.0.0"' android-build/android-companion/app/build.gradle.kts
+          grep -q 'youtube:player_client=android' android-build/android-companion/app/src/main/java/com/rhythmlab/companion/YoutubeEngine.kt
+          grep -q 'ExtractedMedia' android-build/android-companion/app/src/main/java/com/rhythmlab/companion/YoutubeEngine.kt
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$(find "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.COMPANION_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing COMPANION_KEYSTORE_BASE64 secret'; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo 'Missing COMPANION_KEYSTORE_PASSWORD secret'; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/companion.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/companion.p12" -storepass "$KEYSTORE_PASSWORD" -alias companion >/dev/null
+
+      - name: Test byte ranges
+        working-directory: android-build/android-companion
+        shell: bash
+        run: |
+          set -euo pipefail
+          javac -d "$RUNNER_TEMP/range-tests" app/src/main/java/com/rhythmlab/companion/ByteRange.java tests/ByteRangeTest.java
+          java -cp "$RUNNER_TEMP/range-tests" ByteRangeTest
+
+      - name: Build signed release APK
+        working-directory: android-build/android-companion
+        env:
+          COMPANION_KEYSTORE_PATH: ${{ runner.temp }}/companion.p12
+          COMPANION_KEYSTORE_PASSWORD: ${{ secrets.COMPANION_KEYSTORE_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify signature and BEATDASH v3 version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android-build/android-companion/app/build/outputs/apk/release/app-release.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:')"
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='com.rhythmlab.companion'"
+          echo "$BADGING" | grep -q "versionName='3.0.0'"
+          cp "$APK" "$RUNNER_TEMP/BEATDASH-v3.0.0-signed.apk"
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BEATDASH-v3.0.0-signed
+          path: ${{ runner.temp }}/BEATDASH-v3.0.0-signed.apk
+          retention-days: 30
