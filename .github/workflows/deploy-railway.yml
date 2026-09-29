@@ -2,24 +2,32 @@ name: Deploy Railway Production
 
 on:
   push:
-    branches:
-      - railway-prod
-
+    branches: [railway-prod]
   workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: railway-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/railway-prod'
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Stamp deployment revision
+        run: printf '%s\n' "$GITHUB_SHA" > web/BUILD_REVISION
+      - name: Verify root Dockerfile before deployment
+        run: bash scripts/verify_container.sh
       - name: Install Railway CLI
         run: npm install -g @railway/cli
-
       - name: Deploy to Railway
-        run: >
+        run: >-
           railway up
           --project 79af9830-4a88-4391-844d-60f02aaaf78f
           --environment production
@@ -27,3 +35,22 @@ jobs:
           --ci
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Verify deployed revision
+        env:
+          HEALTH_URL: https://web-production-e18dd.up.railway.app/api/health
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, time, urllib.request
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen(os.environ["HEALTH_URL"], timeout=10) as response:
+                      health = json.load(response)
+                  if health.get("ok") and health.get("version") == "4.0.0" and health.get("revision") == os.environ["GITHUB_SHA"]:
+                      print("PASS deployed revision", health["revision"])
+                      break
+              except Exception as error:
+                  print(type(error).__name__, str(error))
+              time.sleep(5)
+          else:
+              raise SystemExit("Deployment health/revision did not match; retain rollback sources")
+          PYTHON

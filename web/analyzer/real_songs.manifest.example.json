@@ -1,0 +1,29 @@
+[
+  {
+    "path": "/absolute/path/to/steady-pop.mp3",
+    "title": "Steady 4/4 Pop",
+    "category": "pop",
+    "expectedBpm": 120
+  },
+  {
+    "path": "/absolute/path/to/fast-jpop.mp3",
+    "title": "Fast J-Pop",
+    "category": "jpop",
+    "expectedBpm": 180
+  },
+  {
+    "path": "/absolute/path/to/band-rock.mp3",
+    "title": "Band / Rock",
+    "category": "rock"
+  },
+  {
+    "path": "/absolute/path/to/electronic.mp3",
+    "title": "Electronic",
+    "category": "electronic"
+  },
+  {
+    "path": "/absolute/path/to/vocal-ballad.mp3",
+    "title": "Vocal / Slow",
+    "category": "vocal"
+  }
+]
