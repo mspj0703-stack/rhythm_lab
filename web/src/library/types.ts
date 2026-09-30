@@ -16,7 +16,10 @@ export interface LibrarySong {
   mediaType: string;
   mediaBlob?: Blob;
   sourceUrl?: string;
+  /** Legacy v4 artwork field; retained for migration compatibility. */
   thumbnailUrl?: string;
+  originalThumbnail?: string;
+  customCover?: string;
   timingOffsetMs: number;
   createdAt: number;
   updatedAt: number;

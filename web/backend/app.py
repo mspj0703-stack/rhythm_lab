@@ -43,7 +43,7 @@ ANALYZE_SEMAPHORE = asyncio.Semaphore(ANALYZE_CONCURRENCY)
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".webm", ".mp4"}
 DIFFICULTIES = {"easy", "normal", "hard", "expert"}
 
-app = FastAPI(title="BEATDASH", version="4.0.0")
+app = FastAPI(title="BEATDASH", version="4.75.0-rc.phase1")
 
 
 class EvaluationPayload(BaseModel):
@@ -66,9 +66,47 @@ def _validate_youtube_url(raw_url: str) -> str:
         raise HTTPException(status_code=400, detail="올바른 YouTube 링크를 입력해 주세요.") from exc
     host = (parsed.hostname or "").lower()
     allowed = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
-    if parsed.scheme not in {"http", "https"} or host not in allowed:
+    if parsed.scheme not in {"http", "https"} or host not in allowed or parsed.username or parsed.password or parsed.netloc.lower() not in allowed:
         raise HTTPException(status_code=400, detail="YouTube 링크만 사용할 수 있습니다.")
     return raw_url.strip()
+
+
+PREVIEW_SEMAPHORE = asyncio.Semaphore(2)
+
+
+def _youtube_preview(url: str) -> dict:
+    # Metadata only: bounded subprocess, no media download, no client-provided destination.
+    proc = subprocess.run([
+        sys.executable, "-m", "yt_dlp", "--no-playlist", "--no-warnings",
+        "--skip-download", "--dump-single-json", "--socket-timeout", "15",
+        "--retries", "1", url,
+    ], check=True, capture_output=True, text=True, timeout=45)
+    info = json.loads(proc.stdout)
+    duration = info.get("duration")
+    if info.get("is_live") or not isinstance(duration, (int, float)) or not 0 < duration <= MAX_AUDIO_DURATION_SEC:
+        raise ValueError("unsupported duration")
+    thumbnail = info.get("thumbnail") or ""
+    if urlparse(thumbnail).scheme != "https":
+        thumbnail = ""
+    return {"title": str(info.get("title") or "YouTube 영상")[:500],
+            "thumbnail": thumbnail, "duration": duration,
+            "channel": str(info.get("channel") or info.get("uploader") or "")[:240]}
+
+
+@app.post("/api/youtube-preview")
+async def youtube_preview(payload: YoutubeAnalyzePayload) -> dict:
+    url = _validate_youtube_url(payload.url)
+    try:
+        # Reject overload promptly rather than building an unbounded metadata queue.
+        await asyncio.wait_for(PREVIEW_SEMAPHORE.acquire(), timeout=0.2)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=429, detail="잠시 후 다시 시도해 주세요.") from exc
+    try:
+        return await run_in_threadpool(_youtube_preview, url)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="영상을 불러올 수 없습니다. 링크와 영상 공개 여부를 확인해 주세요.") from exc
+    finally:
+        PREVIEW_SEMAPHORE.release()
 
 
 def _download_youtube(url: str, analysis_id: str) -> tuple[Path, str, int]:

@@ -15,7 +15,10 @@ import { HomeScreen } from "./components/v4/HomeScreen";
 import { LibraryScreen } from "./components/v4/LibraryScreen";
 import { SongDetailScreen } from "./components/v4/SongDetailScreen";
 import { SettingsScreen } from "./components/v4/SettingsScreen";
-import { loadAudioSettings, playUiSfx, saveAudioSettings, type AudioSettings } from "./audio/sfx";
+import { DEFAULT_AUDIO_SETTINGS, loadAudioSettings, playUiSfx, saveAudioSettings, type AudioSettings } from "./audio/sfx";
+import { DEFAULT_PREFERENCES, loadPreferences, savePreferences, type Preferences } from "./settings/preferences";
+import { DEFAULT_NOTE_SPEED } from "./settings/noteSpeed";
+import { DEFAULT_TIMING_OFFSET_MS } from "./settings/timingOffset";
 import testChartRaw from "./charts/testChart.json?raw";
 import "./App.css";
 
@@ -41,6 +44,7 @@ function LegacyGame() {
   const [noteSpeed] = useState(loadNoteSpeed);
   const [timingOffsetMs] = useState(loadTimingOffsetMs);
   const [audioSettings] = useState(loadAudioSettings);
+  const [preferences] = useState(loadPreferences);
   const [loaded, setLoaded] = useState<{ chart: Chart | null; error: string | null }>(() => source.chartUrl ? { chart: null, error: null } : loadBuiltinChart());
 
   useEffect(() => {
@@ -52,7 +56,7 @@ function LegacyGame() {
 
   if (loaded.error) return <div className="app-error">채보 로드 실패: {loaded.error}</div>;
   if (!loaded.chart) return <div className="app-loading">불러오는 중...</div>;
-  return <div className="app-root"><GameScreen chart={loaded.chart} mediaUrl={source.videoUrl} mediaKind="video" mediaMuted noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} /></div>;
+  return <div className="app-root"><GameScreen chart={loaded.chart} mediaUrl={source.videoUrl} mediaKind="video" mediaMuted noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} preferences={preferences} /></div>;
 }
 
 function App() {
@@ -61,7 +65,7 @@ function App() {
   const companionSession = params.get("session");
   const savedCompanion = params.get("saved") === "1";
 
-  const [view, setView] = useState<View>(companionSession ? "analysis" : "home");
+  const [view, setView] = useState<View>(companionSession ? "analysis" : params.get("view") === "library" ? "library" : params.get("view") === "settings" ? "settings" : "home");
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [analysisBundle, setAnalysisBundle] = useState<LibraryBundle | null>(null);
   const [library, setLibrary] = useState<LibraryBundle[]>([]);
@@ -75,6 +79,7 @@ function App() {
   const [timingOffsetMs, setTimingOffsetMs] = useState(loadTimingOffsetMs);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(loadAudioSettings);
 
+  const [preferences, setPreferences] = useState(loadPreferences);
   const analysisGeneration = useRef(0);
 
   const refreshLibrary = useCallback(async () => {
@@ -106,7 +111,7 @@ function App() {
       const bundle = await saveAnalysisToLibrary(payload, { nativeMedia });
       if (generation === analysisGeneration.current) setAnalysisBundle(bundle);
       await refreshLibrary();
-      if (bundle.song.mediaKind === "video" && !bundle.song.thumbnailUrl) {
+      if (bundle.song.mediaKind === "video" && !(bundle.song.originalThumbnail || bundle.song.thumbnailUrl)) {
         void captureThumbnail(bundle.song.mediaBlob ?? payload.mediaUrl).then(async (thumbnail) => {
           if (thumbnail) { await updateSongThumbnail(bundle.song.id, thumbnail); await refreshLibrary(); }
         }).catch(() => { /* Artwork failure must not invalidate a playable saved song. */ });
@@ -155,6 +160,15 @@ function App() {
   function updateTimingOffset(value: number) { const normalized = normalizeTimingOffsetMs(value); setTimingOffsetMs(normalized); saveTimingOffsetMs(normalized); }
   function updateAudio(value: AudioSettings) { setAudioSettings(value); saveAudioSettings(value); }
 
+  function updatePreferences(value: Preferences) {
+    setPreferences(value);
+    if (!savePreferences(value)) setLibraryError("설정을 저장할 수 없습니다. 현재 실행 중에만 적용됩니다.");
+  }
+  function resetSettings() {
+    updateNoteSpeed(DEFAULT_NOTE_SPEED); updateTimingOffset(DEFAULT_TIMING_OFFSET_MS);
+    updateAudio({ ...DEFAULT_AUDIO_SETTINGS }); updatePreferences({ ...DEFAULT_PREFERENCES });
+  }
+
   async function handleAnalysisComplete(payload: AnalysisResponse) {
     setLibraryPlay(null);
     setAnalysis(payload);
@@ -189,7 +203,6 @@ function App() {
     if (!currentChart) { setLibraryError("채보를 다시 선택해 주세요."); return; }
     const mediaUrl = mediaUrlForSong(bundle.song);
     if (!mediaUrl) { setLibraryError("이 곡의 미디어 파일을 찾을 수 없습니다. 다시 분석해 주세요."); return; }
-    if (libraryPlay?.mediaUrl.startsWith("blob:")) URL.revokeObjectURL(libraryPlay.mediaUrl);
     setLibraryPlay({ bundle, chart: currentChart, mediaUrl });
     setView("play");
   }
@@ -234,9 +247,9 @@ function App() {
 
   const libraryErrorBanner = libraryError ? <div className="v4-global-error" role="alert"><span>{libraryError}</span><button onClick={() => setLibraryError(null)}>×</button></div> : null;
 
-  if (view === "home") return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} /></>;
+  if (view === "home") return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
   if (view === "library") return <>{libraryErrorBanner}<LibraryScreen library={library} onBack={() => nav("home")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} /></>;
-  if (view === "settings") return <SettingsScreen noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} settings={audioSettings} onChange={updateAudio} onBack={() => nav("home")} />;
+  if (view === "settings") return <>{libraryErrorBanner}<SettingsScreen noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} settings={audioSettings} onChange={updateAudio} preferences={preferences} onPreferences={updatePreferences} onSongSettings={() => nav("library")} onReset={resetSettings} onBack={() => nav("home")} /></>;
   if (view === "upload") return <>{libraryErrorBanner}<UploadScreen onBack={() => nav("home")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
 
   if (view === "detail") {
@@ -246,14 +259,14 @@ function App() {
 
   if (view === "play" && libraryPlay) {
     const { bundle, chart, mediaUrl } = libraryPlay;
-    return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("detail")}>← 곡 상세</button><span>{bundle.song.title}</span><span className="companion-badge">LIBRARY</span></div><GameScreen key={`${chart.id}:${chart.chartVersion}`} chart={chart.chart} mediaUrl={mediaUrl} mediaKind={bundle.song.mediaKind} mediaMuted={false} requireStartGesture noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs)} audioSettings={audioSettings} onResult={(result) => savePlayResult({ songId: bundle.song.id, chartId: chart.id, chartVersion: chart.chartVersion, difficulty: chart.difficulty, result, offsetMs: combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs) }).then((feedback) => { void refreshLibrary(); return feedback; })} /></main>;
+    return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("detail")}>← 곡 상세</button><span>{bundle.song.title}</span><span className="companion-badge">LIBRARY</span></div><GameScreen key={`${chart.id}:${chart.chartVersion}`} chart={chart.chart} songTitle={bundle.song.title} mediaUrl={mediaUrl} mediaKind={bundle.song.mediaKind} mediaMuted={false} requireStartGesture noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => nav("detail")} onResult={(result) => savePlayResult({ songId: bundle.song.id, chartId: chart.id, chartVersion: chart.chartVersion, difficulty: chart.difficulty, result, offsetMs: combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs) }).then((feedback) => { void refreshLibrary(); return feedback; })} /></main>;
   }
 
-  if (!analysis) return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} /></>;
+  if (!analysis) return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
   if (view === "analysis") return <>{libraryErrorBanner}<AnalysisSummary data={analysis} saved={savedCompanion} onPlay={() => nav("play")} onReset={() => void resetAnalysis()} noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} /></>;
 
   const parsed = parseChart(JSON.stringify(analysis.chart));
-  return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("analysis")}>← 곡 설정</button><span>{analysis.originalName}</span>{analysisBundle && <span className="companion-badge">LIBRARY SAVED</span>}</div><GameScreen key={analysis.id} chart={parsed} mediaUrl={analysis.mediaUrl} mediaKind={analysis.mediaKind} mediaMuted={false} requireStartGesture resultExtra={savedCompanion ? undefined : <EvaluationPanel analysisId={analysis.id} songName={analysis.chart.title} />} noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} onResult={analysisBundle ? (result) => savePlayResult({ songId: analysisBundle.song.id, chartId: analysisBundle.charts[0].id, chartVersion: analysisBundle.charts[0].chartVersion, difficulty: analysisBundle.charts[0].difficulty, result, offsetMs: timingOffsetMs }).then((feedback) => { void refreshLibrary(); return feedback; }) : undefined} /></main>;
+  return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("analysis")}>← 곡 설정</button><span>{analysis.originalName}</span>{analysisBundle && <span className="companion-badge">LIBRARY SAVED</span>}</div><GameScreen key={analysis.id} chart={parsed} mediaUrl={analysis.mediaUrl} mediaKind={analysis.mediaKind} mediaMuted={false} requireStartGesture resultExtra={savedCompanion ? undefined : <EvaluationPanel analysisId={analysis.id} songName={analysis.chart.title} />} noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => analysisBundle ? void openSong(analysisBundle.song.id) : nav("analysis")} onResult={analysisBundle ? (result) => savePlayResult({ songId: analysisBundle.song.id, chartId: analysisBundle.charts[0].id, chartVersion: analysisBundle.charts[0].chartVersion, difficulty: analysisBundle.charts[0].difficulty, result, offsetMs: timingOffsetMs }).then((feedback) => { void refreshLibrary(); return feedback; }) : undefined} /></main>;
 }
 
 export default App;

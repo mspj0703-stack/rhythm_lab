@@ -32,7 +32,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:text="YouTube 앱에서 공유할 수도 있어요. 생성된 채보와 영상은 이 기기에 저장됩니다."
+            android:text="링크 입력 → 영상 확인 → 채보 만들기 → 플레이\n생성된 곡은 기기에 저장됩니다."
             android:textColor="#A7A3B3"
             android:textSize="14sp" />
 
@@ -44,9 +44,25 @@
             android:backgroundTint="#7C5CE5"
             android:hint="https://youtu.be/..."
             android:inputType="textUri"
+            android:minHeight="52dp"
+            android:imeOptions="actionGo"
             android:singleLine="true"
             android:textColor="#FFFFFF"
             android:textColorHint="#716B7D" />
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/pasteButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:text="붙여넣기" />
+            <Button android:id="@+id/previewButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:text="URL 불러오기" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/previewCard" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone" android:layout_marginTop="16dp">
+            <ImageView android:id="@+id/previewImage" android:layout_width="match_parent" android:layout_height="180dp" android:scaleType="fitCenter" android:contentDescription="원본 영상 썸네일" />
+            <TextView android:id="@+id/previewTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="20sp" android:textColor="#FFFFFF" android:textStyle="bold" />
+            <TextView android:id="@+id/previewMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="14sp" android:textColor="#C4BFCE" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <Button android:id="@+id/libraryButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:text="Library 열기" />
+            <Button android:id="@+id/settingsButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:text="설정" />
+        </LinearLayout>
 
         <TextView
             android:layout_width="wrap_content"
@@ -84,7 +100,7 @@
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:layout_marginTop="26dp"
-            android:text="영상 준비 → AI 채보 생성"
+            android:text="채보 만들기"
             android:textAllCaps="false"
             android:textStyle="bold" />
 
@@ -95,7 +111,8 @@
             android:layout_height="10dp"
             android:layout_marginTop="22dp"
             android:max="100"
-            android:progress="0" />
+            android:indeterminate="true"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/statusText"

@@ -5,9 +5,10 @@ import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
+import org.json.JSONObject
 
 object YoutubeEngine {
-    data class ExtractedMedia(val audio: File, val video: File)
+    data class ExtractedMedia(val audio: File, val video: File, val originalTitle: String?, val thumbnail: File?)
     private var initialized = false
 
     private data class YoutubeStrategy(
@@ -38,6 +39,36 @@ object YoutubeEngine {
         }
     }
 
+    data class Preview(val title: String, val duration: Int, val channel: String, val thumbnail: String)
+
+    @Synchronized
+    fun preview(context: Context, url: String): Preview {
+        ensureInitialized(context) { }
+        val dir = File(context.cacheDir, "preview-${java.util.UUID.randomUUID()}").apply { mkdirs() }
+        try {
+            for (strategy in youtubeStrategies) {
+                try {
+                    val request = YoutubeDLRequest(url).apply {
+                        addOption("--no-playlist")
+                        addOption("--skip-download")
+                        addOption("--write-info-json")
+                        addOption("--socket-timeout", "15")
+                        addOption("--retries", "1")
+                        if (strategy.extractorArgs != null) addOption("--extractor-args", strategy.extractorArgs)
+                        addOption("-o", File(dir, "preview.%(ext)s").absolutePath)
+                    }
+                    YoutubeDL.getInstance().execute(request)
+                    val info = JSONObject(File(dir, "preview.info.json").readText())
+                    val duration = info.optInt("duration")
+                    check(duration in 1..480 && !info.optBoolean("is_live"))
+                    return Preview(info.optString("title", "YouTube 영상"), duration,
+                        info.optString("channel", info.optString("uploader")), info.optString("thumbnail"))
+                } catch (_: Exception) { /* finite metadata fallback, no raw errors in UI */ }
+            }
+            error("영상을 불러올 수 없습니다.")
+        } finally { dir.deleteRecursively() }
+    }
+
     // One progressive A/V download, then derive WAV from that exact source.
     // --keep-video retains source.mp4 after ExtractAudio writes source.wav.
     private fun buildRequest(url: String, dir: File, extractorArgs: String?): YoutubeDLRequest =
@@ -53,6 +84,9 @@ object YoutubeEngine {
             addOption("--audio-format", "wav")
             addOption("--postprocessor-args", "ExtractAudio+ffmpeg_o:-ac 1 -ar 22050 -c:a pcm_s16le")
             addOption("--no-mtime")
+            addOption("--write-info-json")
+            addOption("--write-thumbnail")
+            addOption("--convert-thumbnails", "jpg")
             addOption("-o", File(dir, "source.%(ext)s").absolutePath)
         }
 
@@ -75,8 +109,11 @@ object YoutubeEngine {
                 val audio = File(dir, "source.wav")
                 check(video.isFile && video.length() in 1..(80L * 1024 * 1024)) { "완성된 MP4를 찾지 못했습니다." }
                 check(audio.isFile && audio.length() > 44) { "분석용 WAV 추출 실패" }
+                val info = File(dir, "source.info.json").takeIf { it.isFile }
+                val title = runCatching { info?.let { JSONObject(it.readText()).optString("title").takeIf(String::isNotBlank) } }.getOrNull()
+                val thumbnail = dir.listFiles()?.firstOrNull { it.isFile && it.name.matches(Regex("source\\.(jpg|jpeg)", RegexOption.IGNORE_CASE)) }
                 onProgress(100, "영상·음원 준비 완료")
-                return ExtractedMedia(audio, video)
+                return ExtractedMedia(audio, video, title, thumbnail)
             } catch (e: Exception) { lastError = e }
         }
         dir.deleteRecursively()

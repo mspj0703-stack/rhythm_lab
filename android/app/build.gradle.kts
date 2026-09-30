@@ -15,8 +15,8 @@ android {
         minSdk = 26
         targetSdk = 35
         // This workflow's run number increases for each signed APK.
-        versionCode = 400000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
-        versionName = "4.0.0"
+        versionCode = 475000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
+        versionName = "4.75.0-rc.phase1"
     }
 
     if (companionKeystore != null && companionPassword != null) {

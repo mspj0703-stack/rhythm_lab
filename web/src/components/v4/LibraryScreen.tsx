@@ -1,3 +1,4 @@
+import { artworkForSong } from "../../library/db";
 import { useEffect, useMemo, useState } from "react";
 import { getBestRecordsForSong } from "../../library/db";
 import type { BestRecord, LibraryBundle } from "../../library/types";
@@ -52,7 +53,7 @@ export function LibraryScreen({ library, onBack, onAddSong, onOpenSong }: Props)
         <section className="library-list">
           {visible.map(({ song, charts }) => (
             <button className="library-row" key={song.id} onClick={() => onOpenSong(song.id)}>
-              <div className="library-art">{song.thumbnailUrl ? <img src={song.thumbnailUrl} alt=""/> : <span>{song.mediaKind === "video" ? "MV" : "♪"}</span>}</div>
+              <div className="library-art">{artworkForSong(song) ? <img src={artworkForSong(song)} alt=""/> : <span>{song.mediaKind === "video" ? "MV" : "♪"}</span>}</div>
               <div className="library-main"><strong>{song.title}</strong><span>{song.bpm.toFixed(1)} BPM · {Math.round(song.durationSec)}s</span></div>
               <div className="library-difficulties">
                 {charts.slice().sort((a,b) => a.level-b.level).map((chart) => <span key={chart.id}><small>{chart.difficulty.slice(0,3).toUpperCase()}</small><b className={`clear-${clearBadge(bests[song.id]?.[chart.difficulty]).toLowerCase()}`}>{clearBadge(bests[song.id]?.[chart.difficulty])}</b></span>)}
