@@ -14,7 +14,7 @@ python3 - <<'CHECK'
 import json
 from pathlib import Path
 health = json.loads(Path("/tmp/beatdash-container-health.json").read_text())
-assert health["ok"] is True and health["version"] == "4.0.0", health
+assert health["ok"] is True and health["version"] == "4.75.0-rc.phase1", health
 assert health["revision"] == Path("web/BUILD_REVISION").read_text().strip(), health
 print("PASS container health/version/revision", health)
 CHECK
