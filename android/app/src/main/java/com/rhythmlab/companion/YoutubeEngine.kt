@@ -80,8 +80,14 @@ object YoutubeEngine {
                 check(video.isFile && video.length() in 1..(80L * 1024 * 1024)) { "완성된 MP4를 찾지 못했습니다." }
                 check(audio.isFile && audio.length() > 44) { "분석용 WAV 추출 실패" }
                 val info = File(dir, "source.info.json").takeIf { it.isFile }
-                val title = runCatching { info?.let { JSONObject(it.readText()).optString("title").takeIf(String::isNotBlank) } }.getOrNull()
-                val thumbnail = dir.listFiles()?.firstOrNull { it.isFile && it.name.matches(Regex("source\\.(jpg|jpeg)", RegexOption.IGNORE_CASE)) }
+                val infoJson = runCatching { info?.let { JSONObject(it.readText()) } }.getOrNull()
+                val title = infoJson?.optString("title")?.trim()?.takeIf(String::isNotBlank)
+                // yt-dlp/thumbnail postprocessors may leave jpg/jpeg with a suffix depending on version.
+                // Accept the converted image instead of requiring the exact name source.jpg.
+                val thumbnail = dir.walkTopDown().firstOrNull { file ->
+                    file.isFile && file.extension.lowercase() in setOf("jpg", "jpeg") &&
+                        !file.name.endsWith(".info.json", ignoreCase = true)
+                }
                 onProgress(100, "영상·음원 준비 완료")
                 return ExtractedMedia(audio, video, title, thumbnail)
             } catch (e: Exception) { lastError = e }
