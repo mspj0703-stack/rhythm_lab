@@ -44,6 +44,9 @@ export interface AnalysisReport {
 export interface AnalysisResponse {
   id: string;
   originalName: string;
+  /** Immutable source metadata when supplied by the Companion/importer. */
+  originalTitle?: string;
+  originalThumbnailUrl?: string;
   mediaUrl: string;
   mediaKind: "audio" | "video";
   chart: Chart;

@@ -15,12 +15,13 @@ class SavedSongStore(context: Context) {
         return File(root, id)
     }
 
-    fun save(analysis: JSONObject, audio: File, video: File, videoId: String): Song {
+    fun save(analysis: JSONObject, audio: File, video: File, videoId: String, originalTitle: String? = null, thumbnail: File? = null): Song {
         val id = analysis.getString("id")
         val target = directory(id).apply { mkdirs() }
         val song = Song(
             id,
-            analysis.optJSONObject("chart")?.optString("title")?.takeIf { it.isNotBlank() }
+            originalTitle?.trim()?.takeIf { it.isNotBlank() }
+                ?: analysis.optJSONObject("chart")?.optString("title")?.takeIf { it.isNotBlank() }
                 ?: analysis.optString("originalName", "Untitled"),
             analysis.optJSONObject("report")?.optString("difficulty", "hard") ?: "hard",
             videoId,
@@ -37,8 +38,12 @@ class SavedSongStore(context: Context) {
             val tempVideo = File(target, "video.tmp")
             video.copyTo(tempVideo, overwrite = true)
             check(tempVideo.renameTo(File(target, "video.mp4"))) { "MV 저장 실패" }
+            if (thumbnail?.isFile == true) thumbnail.copyTo(File(target, "thumbnail.jpg"), overwrite = true)
             val localAnalysis = JSONObject(analysis.toString())
                 .put("mediaKind", "video").put("mediaUrl", "/api/video/$id")
+                .put("originalTitle", song.title)
+                .put("originalThumbnailUrl", if (File(target, "thumbnail.jpg").isFile) "/api/thumbnail/$id" else JSONObject.NULL)
+            localAnalysis.optJSONObject("chart")?.put("title", song.title)
             File(target, "analysis.tmp").writeText(localAnalysis.toString())
             check(File(target, "analysis.tmp").renameTo(File(target, "analysis.json"))) { "채보 저장 실패" }
             File(target, "song.tmp").writeText(metadata.toString())
@@ -64,5 +69,6 @@ class SavedSongStore(context: Context) {
     fun session(id: String): File = File(directory(id), "analysis.json")
     fun audio(id: String): File = File(directory(id), "audio.wav")
     fun video(id: String): File = File(directory(id), "video.mp4")
+    fun thumbnail(id: String): File = File(directory(id), "thumbnail.jpg")
     fun delete(id: String) { directory(id).deleteRecursively() }
 }

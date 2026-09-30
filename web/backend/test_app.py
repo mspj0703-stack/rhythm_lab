@@ -65,3 +65,47 @@ def test_reject_bad_difficulty():
         data={"difficulty": "impossible", "seed": "0"},
     )
     assert r.status_code == 400
+
+
+def test_youtube_preview_metadata_only(monkeypatch):
+    import app as module
+    import json
+    from types import SimpleNamespace
+    def run(cmd, **kwargs):
+        assert '--skip-download' in cmd
+        assert '--dump-single-json' in cmd
+        assert kwargs['timeout'] == 45
+        return SimpleNamespace(stdout=json.dumps({'title': 'Original', 'duration': 125, 'channel': 'Artist', 'thumbnail': 'https://i.ytimg.com/vi/id/hqdefault.jpg'}))
+    monkeypatch.setattr(module.subprocess, 'run', run)
+    r = client.post('/api/youtube-preview', json={'url': 'https://youtu.be/abcdefghijk'})
+    assert r.status_code == 200
+    assert r.json()['title'] == 'Original' and r.json()['duration'] == 125
+    assert r.json()['channel'] == 'Artist'
+
+
+def test_youtube_preview_hides_raw_exceptions(monkeypatch):
+    import app as module
+    def fail(url):
+        raise RuntimeError('SECRET exception path /server/private')
+    monkeypatch.setattr(module, '_youtube_preview', fail)
+    r = client.post('/api/youtube-preview', json={'url': 'https://youtu.be/abcdefghijk'})
+    assert r.status_code == 422
+    assert 'SECRET' not in r.text and '/server' not in r.text
+
+
+def test_youtube_preview_rejects_invalid_destinations(monkeypatch):
+    import app as module
+    def should_not_run(url):
+        raise AssertionError('must validate first')
+    monkeypatch.setattr(module, '_youtube_preview', should_not_run)
+    for url in ['https://youtube.com.evil.test/x', 'https://localhost/private', 'https://u:p@youtube.com/x', 'https://youtube.com:8080/x']:
+        assert client.post('/api/youtube-preview', json={'url': url}).status_code == 400
+
+
+def test_youtube_preview_rejects_live_or_long(monkeypatch):
+    import app as module
+    import json
+    from types import SimpleNamespace
+    for info in [{'duration': 0}, {'duration': 800}, {'duration': 60, 'is_live': True}]:
+        monkeypatch.setattr(module.subprocess, 'run', lambda *a, **kw: SimpleNamespace(stdout=json.dumps(info)))
+        assert client.post('/api/youtube-preview', json={'url': 'https://youtu.be/abcdefghijk'}).status_code == 422

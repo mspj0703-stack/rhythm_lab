@@ -3,7 +3,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import { Blob as NodeBlob } from "node:buffer";
 import { webcrypto } from "node:crypto";
-import { deleteSong, getBestRecord, getLibrarySong, getRecordsForChart, listLibrary, saveAnalysisToLibrary, savePlayResult, updateSongTitle, updateSongOffset } from "../library/db";
+import { deleteSong, getBestRecord, getLibrarySong, getRecordsForChart, listLibrary, saveAnalysisToLibrary, savePlayResult, updateSongTitle, updateSongOffset, updateSongCustomCover, artworkForSong } from "../library/db";
 import { makeSongFingerprint } from "../library/model";
 import { combineTimingOffsets, loadTimingOffsetMs } from "../settings/timingOffset";
 import { loadNoteSpeed } from "../settings/noteSpeed";
@@ -28,13 +28,70 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function mutate(stores: string[], action: (tx: IDBTransaction) => void) {
-  const request = indexedDB.open("BEATDASH_DB", 1);
+  const request = indexedDB.open("BEATDASH_DB", 2);
   const db = await new Promise<IDBDatabase>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
   try { await new Promise<void>((resolve, reject) => { const tx = db.transaction(stores, "readwrite"); tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error); action(tx); }); }
   finally { db.close(); }
 }
 
 describe("v4 persisted Library regression", () => {
+  it("upgrades a real v1 database and retains blobs, charts, records, edited title and offsets", async () => {
+    const saved = await saveAnalysisToLibrary(analysis());
+    await savePlayResult(input(saved));
+    const records = await getRecordsForChart(saved.charts[0].id);
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open("BEATDASH_DB", 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        const songs = db.createObjectStore("songs", { keyPath:"id" });
+        songs.createIndex("fingerprint","fingerprint",{unique:true}); songs.createIndex("updatedAt","updatedAt");
+        const charts = db.createObjectStore("charts", {keyPath:"id"});
+        charts.createIndex("songId","songId"); charts.createIndex("songDifficulty",["songId","difficulty"],{unique:true});
+        const plays = db.createObjectStore("playRecords", {keyPath:"id"});
+        plays.createIndex("songId","songId"); plays.createIndex("chartId","chartId"); plays.createIndex("playedAt","playedAt");
+        db.createObjectStore("settings",{keyPath:"key"});
+        songs.put({...saved.song, title:"Edited legacy title", originalTitle:"", timingOffsetMs:35, thumbnailUrl:"data:image/jpeg;base64,legacy"});
+        charts.put(saved.charts[0]); records.forEach(record=>plays.put(record));
+      };
+      req.onsuccess=()=>{req.result.close();resolve();}; req.onerror=()=>reject(req.error);
+    });
+    const migrated = await getLibrarySong(saved.song.id);
+    expect(migrated?.song.originalTitle).toBe("Edited legacy title");
+    expect(migrated?.song.originalThumbnail).toBe("data:image/jpeg;base64,legacy");
+    expect(migrated?.song.mediaBlob?.size).toBe(saved.song.mediaBlob?.size);
+    expect(migrated?.song.timingOffsetMs).toBe(35); expect(migrated?.charts).toHaveLength(1);
+    expect(await getRecordsForChart(saved.charts[0].id)).toHaveLength(1);
+  });
+  it("preserves immutable source title across display rename, reload and chart regeneration", async () => {
+    const source = analysis({ originalTitle: "Original YouTube Title" });
+    const first = await saveAnalysisToLibrary(source);
+    await updateSongTitle(first.song.id, "My Display Title");
+    const reloaded = await getLibrarySong(first.song.id);
+    expect(reloaded?.song.title).toBe("My Display Title");
+    expect(reloaded?.song.originalTitle).toBe("Original YouTube Title");
+    source.chart.notes[0].time = 1.5;
+    const regenerated = await saveAnalysisToLibrary(source);
+    expect(regenerated.song.title).toBe("My Display Title");
+    expect(regenerated.song.originalTitle).toBe("Original YouTube Title");
+  });
+  it("preserves original thumbnail and keeps custom cover separate", async () => {
+    const first = await saveAnalysisToLibrary(analysis({ originalThumbnailUrl: "data:image/jpeg;base64,original" }));
+    expect(first.song.originalThumbnail).toContain("original");
+    await updateSongCustomCover(first.song.id, "data:image/jpeg;base64,custom");
+    let reloaded = await getLibrarySong(first.song.id);
+    expect(artworkForSong(reloaded!.song)).toContain("custom");
+    expect(reloaded?.song.originalThumbnail).toContain("original");
+    const regenerated = analysis({ originalThumbnailUrl: "data:image/jpeg;base64,replacement" });
+    regenerated.chart.notes[0].time = 1.5;
+    await saveAnalysisToLibrary(regenerated);
+    reloaded = await getLibrarySong(first.song.id);
+    expect(reloaded?.song.originalThumbnail).toContain("original");
+    expect(reloaded?.song.customCover).toContain("custom");
+    await updateSongCustomCover(first.song.id, undefined);
+    reloaded = await getLibrarySong(first.song.id);
+    expect(artworkForSong(reloaded!.song)).toContain("original");
+  });
   it("does not merge different bytes with the same filename, duration and BPM", async () => {
     const first = await saveAnalysisToLibrary(analysis()); bytes = "different media";
     const second = await saveAnalysisToLibrary(analysis());

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { DEFAULT_PREFERENCES, supportsVibration, type Preferences } from "../settings/preferences";
 import type { Chart, Lane, NoteRuntime } from "../types/chart";
 import {
   attemptFlick,
@@ -10,10 +11,11 @@ import {
   type GameOptions,
   type GameState,
 } from "../engine/gameState";
+import { playMediaWithTimeout, reloadMediaAtTime } from "../engine/mediaRecovery";
 import { computeResult } from "../engine/resultCalculation";
 import { useInputManager } from "../engine/inputManager";
 import { useGameLoop } from "../hooks/useGameLoop";
-import { getCurrentTimeSec, pauseVideo, playVideo, restartVideo } from "../engine/videoSync";
+import { getCurrentTimeSec, pauseVideo, restartVideo } from "../engine/videoSync";
 import { CANVAS_WIDTH, CANVAS_HEIGHT, JUDGE_LINE_Y } from "../engine/highway";
 import { LANE_KEYS, GAUGE_CONFIG } from "../constants/config";
 import { DEFAULT_NOTE_SPEED, getGameplayLookaheadSec, normalizeNoteSpeed } from "../settings/noteSpeed";
@@ -27,6 +29,10 @@ import type { RecordFeedback } from "../library/types";
 import { DEFAULT_AUDIO_SETTINGS, playHitSfx, playPerfectComboSfx, playFullComboSfx, playStartSfx, playNoticeSfx, type AudioSettings } from "../audio/sfx";
 
 interface Props {
+  preferences?: Preferences;
+  onLibrary?: () => void;
+  onSongDetail?: () => void;
+  songTitle?: string;
   chart: Chart;
   mediaUrl: string;
   mediaKind?: "audio" | "video";
@@ -57,7 +63,7 @@ function isNoteActive(note: NoteRuntime, currentTimeSec: number, noteSpeed: numb
 }
 
 export function GameScreen({
-  chart,
+  chart, songTitle,
   mediaUrl,
   mediaKind = "video",
   mediaMuted = true,
@@ -67,6 +73,8 @@ export function GameScreen({
   timingOffsetMs = DEFAULT_TIMING_OFFSET_MS,
   audioSettings = DEFAULT_AUDIO_SETTINGS,
   onResult,
+  preferences = DEFAULT_PREFERENCES,
+  onLibrary, onSongDetail,
 }: Props) {
   const lockedNoteSpeed = normalizeNoteSpeed(noteSpeed);
   const lockedTimingOffsetMs = normalizeTimingOffsetMs(timingOffsetMs);
@@ -77,8 +85,10 @@ export function GameScreen({
   const [paused, setPaused] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(() => applyTimingOffsetSec(0, lockedTimingOffsetMs));
   const [gameStarted, setGameStarted] = useState(!requireStartGesture);
-  const [mv, setMv] = useState<MvOptions>({ on: true, brightness: 0.4, overlayOpacity: 0.5, blurPx: 0 });
+  const [mv, setMv] = useState<MvOptions>({ on: preferences.backgroundVideo, brightness: preferences.backgroundBrightness, overlayOpacity: 0.5, blurPx: 0 });
   const [pressedLanes, setPressedLanes] = useState<boolean[]>([false, false, false, false]);
+  const [songEnded, setSongEnded] = useState(false);
+  const [showResult, setShowResult] = useState(false);
   const [recordRetry, setRecordRetry] = useState(0);
   const [recordError, setRecordError] = useState<string | null>(null);
   const resultGeneration = useRef(0);
@@ -92,6 +102,19 @@ export function GameScreen({
   const reportedResult = useRef(false);
   const resultSoundPlayed = useRef(false);
   const lastSfxSequence = useRef<number | null>(null);
+  const mediaRecoveryTimer = useRef<number | null>(null);
+  const recoveryAbort = useRef<AbortController | null>(null);
+  const recoveryPosition = useRef<number | null>(null);
+  const recoveryAttempts = useRef(0);
+  const clearMediaRecovery = useCallback(() => {
+    if (mediaRecoveryTimer.current !== null) window.clearTimeout(mediaRecoveryTimer.current);
+    mediaRecoveryTimer.current = null;
+  }, []);
+  const cancelMediaRecovery = useCallback(() => {
+    clearMediaRecovery();
+    recoveryAbort.current?.abort();
+    recoveryAbort.current = null;
+  }, [clearMediaRecovery]);
 
   useEffect(() => () => { resultGeneration.current++; }, []);
 
@@ -101,23 +124,30 @@ export function GameScreen({
   const startMedia = useCallback(async () => {
     const media = mediaRef.current;
     if (!media) return;
+    cancelMediaRecovery();
     const generation = ++playGeneration.current;
+    const controller = new AbortController();
+    recoveryAbort.current = controller;
     setMediaError(null);
     try {
-      await playVideo(media);
+      if (recoveryPosition.current !== null) await reloadMediaAtTime(media, recoveryPosition.current, controller.signal);
+      if (generation !== playGeneration.current) return;
+      await playMediaWithTimeout(media, controller.signal);
       if (generation !== playGeneration.current) return;
       pausedRef.current = false;
       setPaused(false);
       setGameStarted(true);
+      recoveryPosition.current = null;
+      recoveryAttempts.current = 0;
     } catch (error) {
       if (generation !== playGeneration.current) return;
       pausedRef.current = true;
       setPaused(true);
       setMediaError(`재생할 수 없습니다. ${(error as Error).message}`);
-    }
-  }, []);
+    } finally { if (recoveryAbort.current === controller) recoveryAbort.current = null; }
+  }, [cancelMediaRecovery]);
 
-  const cancelPlayback = useCallback(() => { playGeneration.current++; }, []);
+  const cancelPlayback = useCallback(() => { playGeneration.current++; cancelMediaRecovery(); }, [cancelMediaRecovery]);
   useEffect(() => {
     let cancelled = false;
     const media = mediaRef.current;
@@ -126,7 +156,7 @@ export function GameScreen({
     return () => { cancelled = true; cancelPlayback(); pauseVideo(media); };
   }, [requireStartGesture, startMedia, cancelPlayback]);
 
-  const loopActive = gameStarted && !state.finished;
+  const loopActive = gameStarted && !songEnded;
 
   useGameLoop(() => {
     if (pausedRef.current) return;
@@ -135,6 +165,7 @@ export function GameScreen({
     const chartTimeSec = applyTimingOffsetSec(mediaTimeSec, lockedTimingOffsetMs);
     setCurrentTimeSec(chartTimeSec);
     const ended = !!media && media.ended;
+    if (ended) setSongEnded(true);
     setState((s) => tick(s, ended ? Number.POSITIVE_INFINITY : chartTimeSec));
   }, loopActive);
 
@@ -142,25 +173,71 @@ export function GameScreen({
 
   const pauseGame = useCallback(() => {
     playGeneration.current++;
+    cancelMediaRecovery();
     pausedRef.current = true;
     setPaused(true);
     pauseVideo(mediaRef.current);
     // A paused hold requires a fresh press on resume; it cannot auto-clear hands-free.
-    const t = applyTimingOffsetSec(getCurrentTimeSec(mediaRef.current), lockedTimingOffsetMs);
+    const t = applyTimingOffsetSec(recoveryPosition.current ?? getCurrentTimeSec(mediaRef.current), lockedTimingOffsetMs);
     setState((s) => ([0, 1, 2, 3] as Lane[]).reduce((next, lane) => attemptHoldRelease(next, lane, t), s));
     touchStarts.current.clear();
     setPressedLanes([false, false, false, false]);
-  }, [lockedTimingOffsetMs]);
+  }, [lockedTimingOffsetMs, cancelMediaRecovery]);
+
+  const recoverMedia = useCallback(async (reason: string) => {
+    const media = mediaRef.current;
+    if (!media || songEnded || recoveryAbort.current) return;
+    // A preload error or a paused screen must never start itself.
+    if (!gameStarted || pausedRef.current) {
+      recoveryPosition.current ??= Number.isFinite(media.currentTime) ? media.currentTime : 0;
+      setMediaError(`${reason} · 재생 다시 시도를 눌러 주세요.`);
+      return;
+    }
+    recoveryPosition.current = Number.isFinite(media.currentTime) ? media.currentTime : 0;
+    pauseGame(); // freeze judgement and release held inputs before load() resets the clock
+    if (recoveryAttempts.current >= 2) {
+      setMediaError(`${reason} · 자동 복구 한도에 도달했습니다. 재생 다시 시도를 눌러 주세요.`);
+      return;
+    }
+    recoveryAttempts.current++;
+    const generation = playGeneration.current;
+    const controller = new AbortController();
+    recoveryAbort.current = controller;
+    setMediaError(`${reason} · 재생 복구 중…`);
+    try {
+      await reloadMediaAtTime(media, recoveryPosition.current, controller.signal);
+      if (generation !== playGeneration.current) return;
+      await playMediaWithTimeout(media, controller.signal);
+      if (generation !== playGeneration.current) return;
+      recoveryPosition.current = null;
+      setMediaError(null); pausedRef.current = false; setPaused(false);
+    } catch (error) {
+      if (generation !== playGeneration.current) return;
+      pauseVideo(media);
+      setMediaError(`${reason} · 재생 복구 실패: ${(error as Error).message}`);
+    } finally { if (recoveryAbort.current === controller) recoveryAbort.current = null; }
+  }, [gameStarted, songEnded, pauseGame]);
+
+  const scheduleMediaRecovery = useCallback((reason: string) => {
+    if (!gameStarted || mediaRecoveryTimer.current !== null || pausedRef.current || songEnded || recoveryAbort.current) return;
+    const generation = playGeneration.current;
+    mediaRecoveryTimer.current = window.setTimeout(() => {
+      mediaRecoveryTimer.current = null;
+      const media = mediaRef.current;
+      if (generation !== playGeneration.current || pausedRef.current || songEnded) return;
+      if (media && !media.ended && media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) void recoverMedia(reason);
+    }, 3000);
+  }, [gameStarted, songEnded, recoverMedia]);
 
   const handlePauseToggle = useCallback(() => {
-    if (!gameStarted || stateRef.current.finished) return;
+    if (!gameStarted || songEnded) return;
     if (pausedRef.current) void startMedia();
     else pauseGame();
-  }, [gameStarted, startMedia, pauseGame]);
+  }, [gameStarted, songEnded, startMedia, pauseGame]);
 
   useEffect(() => {
-    const hide = () => { if (document.hidden && gameStarted) pauseGame(); };
-    const blur = () => { if (gameStarted) pauseGame(); };
+    const hide = () => { if (document.hidden && gameStarted && !songEnded) pauseGame(); };
+    const blur = () => { if (gameStarted && !songEnded) pauseGame(); };
     document.addEventListener("visibilitychange", hide);
     window.addEventListener("blur", blur);
     window.addEventListener("beatdash:pause", blur);
@@ -169,7 +246,7 @@ export function GameScreen({
       window.removeEventListener("blur", blur);
       window.removeEventListener("beatdash:pause", blur);
     };
-  }, [gameStarted, pauseGame]);
+  }, [gameStarted, songEnded, pauseGame]);
 
   const setLanePressed = useCallback((lane: Lane, pressed: boolean) => {
     setPressedLanes((prev) => {
@@ -181,8 +258,8 @@ export function GameScreen({
   }, []);
 
   const handleLaneKeyDown = useCallback((lane: Lane) => {
-    setLanePressed(lane, true);
     if (!gameStarted || pausedRef.current || stateRef.current.failed || stateRef.current.finished) return;
+    setLanePressed(lane, true);
     const t = applyTimingOffsetSec(getCurrentTimeSec(mediaRef.current), lockedTimingOffsetMs);
     setState((s) => attemptLanePress(s, lane, t));
   }, [gameStarted, lockedTimingOffsetMs, setLanePressed]);
@@ -210,7 +287,10 @@ export function GameScreen({
   useInputManager(inputCallbacks, gameStarted && !state.finished, paused);
 
   const handleRestart = useCallback(() => {
-    playGeneration.current++;
+    setSongEnded(false); setShowResult(false);
+    cancelPlayback();
+    recoveryPosition.current = null;
+    recoveryAttempts.current = 0;
     pausedRef.current = false;
     setMediaError(null);
     touchStarts.current.clear();
@@ -225,15 +305,27 @@ export function GameScreen({
     reportedResult.current = false;
     resultSoundPlayed.current = false;
     restartVideo(mediaRef.current);
-    if (requireStartGesture) setGameStarted(false);
-    else {
-      void startMedia();
-    }
-  }, [lockedTimingOffsetMs, requireStartGesture, startMedia]);
+    setGameStarted(false);
+  }, [lockedTimingOffsetMs, cancelPlayback]);
 
   useEffect(() => {
-    if (state.finished) pauseVideo(mediaRef.current);
+    let cancelled = false;
+    if (!requireStartGesture && !gameStarted && !showResult) void Promise.resolve().then(() => { if (!cancelled) void startMedia(); });
+    return () => { cancelled = true; };
+  }, [requireStartGesture, gameStarted, showResult, startMedia]);
+
+  useEffect(() => {
+    if (!state.finished) return;
+    touchStarts.current.clear();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   }, [state.finished]);
+
+  useEffect(() => {
+    if (!songEnded) return;
+    cancelPlayback(); pauseVideo(mediaRef.current);
+    const timer = window.setTimeout(() => setShowResult(true), 600);
+    return () => window.clearTimeout(timer);
+  }, [songEnded, cancelPlayback]);
 
   const activeNotes = useMemo(
     () => state.notes.filter((n) => isNoteActive(n, currentTimeSec, lockedNoteSpeed)),
@@ -244,25 +336,26 @@ export function GameScreen({
   useEffect(() => {
     const media = mediaRef.current;
     if (media) media.volume = Math.max(0, Math.min(1, audioSettings.masterVolume * audioSettings.musicVolume));
-  }, [audioSettings]);
+  }, [audioSettings, showResult]);
 
   useEffect(() => {
     const feedback = state.lastFeedback;
     if (!feedback || feedback.sequence === lastSfxSequence.current) return;
     lastSfxSequence.current = feedback.sequence;
+    if (preferences.vibration && supportsVibration() && feedback.judgement !== "Miss") navigator.vibrate(10);
     if (feedback.phase === "hold_complete") playHitSfx(audioSettings, "hold");
     else if (feedback.noteType === "flick" && feedback.judgement !== "Miss") playHitSfx(audioSettings, "flick");
     else playHitSfx(audioSettings, feedback.judgement.toLowerCase() as "perfect" | "great" | "good" | "miss");
-  }, [state.lastFeedback, audioSettings]);
+  }, [state.lastFeedback, audioSettings, preferences.vibration]);
 
   useEffect(() => {
-    if (!state.finished || resultSoundPlayed.current) return;
+    if (!showResult || resultSoundPlayed.current) return;
     resultSoundPlayed.current = true;
     const clear = getClearType(result);
     if (clear === "PERFECT_COMBO") playPerfectComboSfx(audioSettings);
     else if (clear === "FULL_COMBO") playFullComboSfx(audioSettings);
     else playNoticeSfx(audioSettings, "result");
-  }, [state.finished, result, audioSettings]);
+  }, [showResult, result, audioSettings]);
 
   useEffect(() => {
     if (!state.finished || reportedResult.current || !onResult) return;
@@ -288,14 +381,20 @@ export function GameScreen({
     };
   }, [state, currentTimeSec, paused, gameStarted, lockedNoteSpeed, lockedTimingOffsetMs]);
 
+  const handleEnded = () => { setPaused(false); setState(s => tick(s, Number.POSITIVE_INFINITY)); setSongEnded(true); };
+
   const videoFilter = `brightness(${mv.brightness}) blur(${mv.blurPx}px)`;
   const mediaNode = mediaKind === "audio" ? (
-    <audio ref={(node) => { mediaRef.current = node; }} src={mediaUrl} onError={() => { pauseGame(); setMediaError("오디오 파일을 재생할 수 없습니다."); }} preload="auto" />
+    <audio onEnded={handleEnded} ref={(node) => { mediaRef.current = node; }} src={mediaUrl} onError={() => { void recoverMedia("오디오 파일 오류"); }} onStalled={() => scheduleMediaRecovery("오디오 로딩 지연")} onWaiting={() => scheduleMediaRecovery("오디오 버퍼링")} onPlaying={clearMediaRecovery} preload="auto" />
   ) : (
     <video
+      onEnded={handleEnded}
       ref={(node) => { mediaRef.current = node; }}
       src={mediaUrl}
-      onError={() => { pauseGame(); setMediaError("영상 파일을 재생할 수 없습니다."); }}
+      onError={() => { void recoverMedia("영상 파일 오류"); }}
+      onStalled={() => scheduleMediaRecovery("영상 로딩 지연")}
+      onWaiting={() => scheduleMediaRecovery("영상 버퍼링")}
+      onPlaying={clearMediaRecovery}
       muted={mediaMuted}
       playsInline
       preload="auto"
@@ -317,11 +416,16 @@ export function GameScreen({
       ? "HOLD BREAK"
       : feedback?.judgement ?? null;
 
+  const saveError = recordError && <div role="alert">{recordError}<button onClick={() => { reportedResult.current = false; setRecordError(null); setRecordRetry(value => value + 1); }}>기록 저장 다시 시도</button></div>;
+  if (showResult) return <div className="result-page">{saveError}<ResultScreen title={songTitle ?? chart.title} difficulty={chart.difficulty} result={result} onRestart={handleRestart} feedback={recordFeedback} onLibrary={onLibrary} onSongDetail={onSongDetail}/>{resultExtra && <details className="result-extra"><summary>Rate AI Chart</summary>{resultExtra}</details>}</div>;
+
   return (
-    <div className="game-screen">
+    <div className={`game-screen effects-${preferences.effects} ${songEnded ? "finishing" : ""}`}>
+      {saveError}
+      {songEnded && <div className="finish-status" role="status">TRACK COMPLETE</div>}
       <div className="game-meta-row">
         <div className="game-song-meta">
-          <strong>{chart.title}</strong>
+          <strong>{songTitle ?? chart.title}</strong>
           <span>{chart.artist}</span>
         </div>
         <div className="game-chart-meta">
@@ -352,24 +456,24 @@ export function GameScreen({
             type="button"
             aria-label="일시정지"
             onClick={handlePauseToggle}
-            disabled={!gameStarted || state.finished}
+            disabled={!gameStarted || songEnded}
           >Ⅱ</button>
         </div>
 
-        <div className="combo-display">
+        <div className="combo-display" hidden={!preferences.combo}>
           {state.combo > 0 && <div className="combo-number">{state.combo}</div>}
           {state.combo > 0 && <div className="combo-label">COMBO</div>}
         </div>
 
         <div className="lane-input-feedback" aria-hidden="true">
-          {pressedLanes.map((pressed, lane) => <i key={lane} className={pressed ? "pressed" : ""} />)}
+          {pressedLanes.map((pressed, lane) => <i key={lane} className={pressed && !state.finished ? "pressed" : ""} />)}
         </div>
 
         {feedback && feedbackLabel && (
           <>
             <div key={`label-${feedback.sequence}`} className={`judgement-feedback judgement-pop ${feedback.judgement.toLowerCase()} ${feedback.phase}`}>
-              <strong>{feedbackLabel}</strong>
-              {timingWord && <span>{timingWord}{timingMs ? ` · ${timingMs}` : ""}</span>}
+              {preferences.judgementText && <strong>{feedbackLabel}</strong>}
+              {preferences.fastSlow && timingWord && <span>{timingWord}{timingMs ? ` · ${timingMs}` : ""}</span>}
             </div>
             <div
               key={`effect-${feedback.sequence}`}
@@ -454,18 +558,7 @@ export function GameScreen({
         </details>
       )}
 
-      {state.finished && (
-        <>
-          {recordError && <div role="alert">{recordError}<button onClick={() => { reportedResult.current = false; setRecordError(null); setRecordRetry((value) => value + 1); }}>기록 저장 다시 시도</button></div>}
-          <ResultScreen result={result} onRestart={handleRestart} feedback={recordFeedback} />
-          {resultExtra && (
-            <details className="result-extra">
-              <summary>Rate AI Chart</summary>
-              {resultExtra}
-            </details>
-          )}
-        </>
-      )}
+
     </div>
   );
 }

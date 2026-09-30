@@ -244,7 +244,7 @@ async function main() {
     );
 
     await page.waitForFunction(() => window.__RHYTHM_DEBUG__ && window.__RHYTHM_DEBUG__.state.finished, { timeout: 8000 }).catch(() => {});
-    await wait(200);
+    await page.waitForSelector(".result-screen", { timeout: 20000 });
     d = await getDebug(page);
     const resultVisible = await page.evaluate(() => !!document.querySelector(".result-screen"));
     record("B8. 곡 종료 후 finished=true & ResultScreen 표시", d.finished === true && resultVisible, `finished=${d.finished}, resultVisible=${resultVisible}`);
@@ -509,7 +509,7 @@ async function main() {
       const timer = setInterval(loop, 4);
     });
     await page.waitForFunction(() => window.__RHYTHM_DEBUG__ && window.__RHYTHM_DEBUG__.state.finished, { timeout: 25000 }).catch(() => {});
-    await wait(300);
+    await page.waitForSelector(".result-screen", { timeout: 20000 });
     d = await getDebug(page);
     const resultVisible = await page.evaluate(() => !!document.querySelector(".result-screen"));
     const c = d.judgementCounts;

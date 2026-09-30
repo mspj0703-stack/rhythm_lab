@@ -5,7 +5,7 @@ import { buildRecordFeedback, getClearType, makeSongFingerprint, summarizeRecord
 import type { BestRecord, LibraryBundle, LibraryChart, LibrarySong, PlayRecord, RecordFeedback } from "./types";
 
 const DB_NAME = "BEATDASH_DB";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SONGS = "songs";
 const CHARTS = "charts";
 const RECORDS = "playRecords";
@@ -29,8 +29,9 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
 async function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const tx = request.transaction;
       if (!db.objectStoreNames.contains(SONGS)) {
         const store = db.createObjectStore(SONGS, { keyPath: "id" });
         store.createIndex("fingerprint", "fingerprint", { unique: true });
@@ -48,6 +49,22 @@ async function openDb(): Promise<IDBDatabase> {
         store.createIndex("playedAt", "playedAt");
       }
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: "key" });
+      // v2 is additive: preserve all v3/v4 data and backfill artwork metadata in place.
+      if (event.oldVersion < 2 && tx && db.objectStoreNames.contains(SONGS)) {
+        const store = tx.objectStore(SONGS);
+        const cursor = store.openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          const song = row.value as LibrarySong;
+          row.update({
+            ...song,
+            originalTitle: song.originalTitle || song.title || song.originalName,
+            originalThumbnail: song.originalThumbnail || song.thumbnailUrl,
+          });
+          row.continue();
+        };
+      }
     };
     request.onsuccess = () => { request.result.onversionchange = () => request.result.close(); resolve(request.result); };
     request.onerror = () => reject(request.error ?? new Error("BEATDASH library could not be opened"));
@@ -101,17 +118,24 @@ export async function saveAnalysisToLibrary(analysis: AnalysisResponse, options:
     const old = existing ?? (legacyId ? await requestToPromise(songs.get(legacyId)) as LibrarySong | undefined : undefined);
     if (options.songId && !old) throw new Error("곡이 삭제되었습니다. Library에서 다시 선택해 주세요.");
     const now = Date.now();
+    const sourceOriginalTitle = (typeof analysis.originalTitle === "string" ? analysis.originalTitle.trim() : "") || analysis.chart.title?.trim() || analysis.originalName;
+    const sourceThumbnail = (typeof analysis.originalThumbnailUrl === "string" ? analysis.originalThumbnailUrl.trim() : "") || undefined;
     const song: LibrarySong = old ? {
-      ...old, fingerprint: options.songId ? old.fingerprint : fingerprint, updatedAt: now,
+      ...old,
+      fingerprint: options.songId ? old.fingerprint : fingerprint,
+      originalTitle: old.originalTitle || sourceOriginalTitle,
+      originalThumbnail: old.originalThumbnail || old.thumbnailUrl || sourceThumbnail,
+      updatedAt: now,
     } : {
       id: uuid("song"), fingerprint,
-      title: analysis.chart.title || analysis.originalName,
-      originalTitle: analysis.chart.title || analysis.originalName,
+      title: sourceOriginalTitle,
+      originalTitle: sourceOriginalTitle,
       originalName: analysis.originalName,
       bpm: analysis.chart.bpm || analysis.report.bpm || 0,
       durationSec: analysis.report.duration || 0,
       mediaKind: analysis.mediaKind, mediaName: analysis.originalName,
       mediaType: mediaBlob?.type ?? "", mediaBlob, sourceUrl: analysis.mediaUrl,
+      originalThumbnail: sourceThumbnail, thumbnailUrl: sourceThumbnail,
       timingOffsetMs: 0, createdAt: now, updatedAt: now,
     };
     const difficulty = analysis.chart.difficulty.toLowerCase();
@@ -229,5 +253,20 @@ export function mediaUrlForSong(song: LibrarySong): string | null {
 }
 
 export async function updateSongThumbnail(songId: string, thumbnailUrl: string): Promise<void> {
-  await updateSong(songId, { thumbnailUrl });
+  // Read/check/write atomically so a delayed frame capture cannot replace source artwork.
+  await transaction([SONGS], "readwrite", async (tx) => {
+    const store = tx.objectStore(SONGS);
+    const song = await requestToPromise(store.get(songId)) as LibrarySong | undefined;
+    if (!song) throw new Error("곡을 찾을 수 없습니다.");
+    if (song.originalThumbnail || song.thumbnailUrl) return;
+    store.put({ ...song, originalThumbnail: thumbnailUrl, thumbnailUrl });
+  });
+}
+
+export async function updateSongCustomCover(songId: string, customCover?: string): Promise<void> {
+  await updateSong(songId, { customCover });
+}
+
+export function artworkForSong(song: LibrarySong): string | undefined {
+  return song.customCover || song.originalThumbnail || song.thumbnailUrl;
 }

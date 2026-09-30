@@ -4,7 +4,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const checks = [];
 function check(name, value) { assert.ok(value, name); checks.push(name); console.log('PASS', name); }
-const out = process.env.REVIEW_OUTPUT || 'review-output/v4';
+const out = process.env.REVIEW_OUTPUT || 'review-output/hotfix';
 const payload = (id, title, difficulty = 'normal') => ({ id, originalName:'source.wav', mediaKind:'video', mediaUrl:`/api/video/${id}`,
   chart:{title,artist:'QA',bpm:120,offset:0,difficulty,level:2,notes:[{time:1,lane:0,type:'tap'},{time:2,lane:1,type:'tap'}]},
   report:{duration:5,bpm:120,generatorVersion:'review',seed:42,notesPerSecond:1,finalNoteCount:2,peakNotesIn1s:1,warnings:[],tempoCandidates:[],quality:{}}
@@ -92,6 +92,28 @@ const payload = (id, title, difficulty = 'normal') => ({ id, originalName:'sourc
     db=await stores(); check('difficulty regeneration preserves song identity and original title',db.songs.length===1&&db.charts.length===2&&db.songs[0].title==='Custom Title'&&db.songs[0].originalTitle==='Native First');
     check('video regeneration uploads MP4 filename, not source.wav',await page.evaluate(()=>window.__REVIEW_UPLOADS__.at(-1)==='source.mp4'));
     check('video thumbnail and creation date are displayed', await page.$eval('.detail-hero',e=>Boolean(e.querySelector('img')?.src.startsWith('data:image/jpeg'))&&e.textContent.includes('추가:')));
+    const originalArtwork = await page.$eval('.detail-art img',img=>img.src);
+    for (const [type,extension,color] of [['image/jpeg','jpg','#ff0000'],['image/png','png','#00ff00'],['image/webp','webp','#0000ff']]) {
+      const data=await page.evaluate(({type,color})=>{const c=document.createElement('canvas');c.width=1200;c.height=800;const x=c.getContext('2d');x.fillStyle=color;x.fillRect(0,0,1200,800);return c.toDataURL(type);},{type,color});
+      const file=path.join(out,`cover.${extension}`);fs.writeFileSync(file,Buffer.from(data.split(',')[1],'base64'));
+      const prior = await page.$eval('.detail-art img',img=>img.src);
+      await (await page.$('.cover-actions input[type=file]')).uploadFile(path.resolve(file));
+      await page.waitForFunction(previous=>document.querySelector('.detail-art img').src!==previous,{},prior);
+      const dimensions=await page.$eval('.detail-art img',img=>[img.naturalWidth,img.naturalHeight]);
+      check(`custom ${extension} resized and displayed`,dimensions[0]===960&&dimensions[1]===640);
+      db=await stores();check(`custom ${extension} preserves original artwork`,db.songs[0].originalThumbnail===originalArtwork&&Boolean(db.songs[0].customCover));
+    }
+    await page.screenshot({path:path.join(out,'mobile-custom-cover.png'),fullPage:true});
+    check('cover controls fit mobile detail layout',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+    const customArtwork=await page.$eval('.detail-art img',img=>img.src);
+    await page.reload();await page.waitForSelector('.song-card');await page.click('.song-card');await page.waitForSelector('.detail-art img');
+    check('custom cover survives page reload',await page.$eval('.detail-art img',(img,expected)=>img.src===expected,customArtwork));
+    await clickText('원본 썸네일로 되돌리기');
+    await page.waitForFunction(original=>document.querySelector('.detail-art img').src===original,{},originalArtwork);
+    check('restore clears only custom artwork',!(await stores()).songs[0].customCover);
+    await (await page.$('.cover-actions input[type=file]')).uploadFile(path.resolve(path.join(out,'cover.webp')));
+    await page.waitForFunction(original=>document.querySelector('.detail-art img').src!==original,{},originalArtwork);
+    check('same file can be selected again after restore',await page.$eval('.detail-art img',img=>img.src.startsWith('data:image/jpeg')));
     await page.screenshot({path:path.join(out,'mobile-song-detail.png'),fullPage:true});
     await clickText('+10');
     await page.click('.big-play'); await page.waitForSelector('.start-card');
@@ -108,6 +130,14 @@ const payload = (id, title, difficulty = 'normal') => ({ id, originalName:'sourc
     check('web Library plays Blob URL',await page.$eval('video',v=>v.src.startsWith('blob:')));
     await clickText('START'); await page.waitForFunction(()=>document.querySelector('video').currentTime>0); await advance(1.5);
     check('Blob video seek uses the same judgement clock',await page.evaluate(()=>Math.abs(window.__RHYTHM_DEBUG__.currentTimeSec-1.428)<.02));
+    const clockBefore = await page.$eval('video',v=>v.currentTime);
+    await page.evaluate(()=>document.querySelector('video').dispatchEvent(new Event('error')));
+    await page.waitForFunction(()=>window.__RHYTHM_DEBUG__.paused);
+    await page.waitForFunction(()=>!window.__RHYTHM_DEBUG__.paused && !document.querySelector('video').paused);
+    check('real Blob reload restores playback position',await page.$eval('video',(v,t)=>v.currentTime>=t&&v.currentTime<t+1,clockBefore));
+    await page.evaluate(()=>{document.querySelector('video').dispatchEvent(new Event('error'));window.dispatchEvent(new Event('beatdash:pause'));});
+    await page.waitForFunction(()=>window.__RHYTHM_DEBUG__.paused&&document.querySelector('video').paused);
+    check('background event keeps recovery paused',await page.evaluate(()=>window.__RHYTHM_DEBUG__.paused));
     await clickText('곡 상세'); await page.waitForSelector('.big-play'); await clickText('← LIBRARY');
     for(const [width,height] of [[390,844],[768,1024],[1440,900]]){
       await page.setViewport({width,height}); await page.screenshot({path:path.join(out,`library-${width}.png`),fullPage:true});
