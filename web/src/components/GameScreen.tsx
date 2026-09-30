@@ -10,10 +10,11 @@ import {
   type GameOptions,
   type GameState,
 } from "../engine/gameState";
+import { playMediaWithTimeout, reloadMediaAtTime } from "../engine/mediaRecovery";
 import { computeResult } from "../engine/resultCalculation";
 import { useInputManager } from "../engine/inputManager";
 import { useGameLoop } from "../hooks/useGameLoop";
-import { getCurrentTimeSec, pauseVideo, playVideo, restartVideo } from "../engine/videoSync";
+import { getCurrentTimeSec, pauseVideo, restartVideo } from "../engine/videoSync";
 import { CANVAS_WIDTH, CANVAS_HEIGHT, JUDGE_LINE_Y } from "../engine/highway";
 import { LANE_KEYS, GAUGE_CONFIG } from "../constants/config";
 import { DEFAULT_NOTE_SPEED, getGameplayLookaheadSec, normalizeNoteSpeed } from "../settings/noteSpeed";
@@ -92,6 +93,19 @@ export function GameScreen({
   const reportedResult = useRef(false);
   const resultSoundPlayed = useRef(false);
   const lastSfxSequence = useRef<number | null>(null);
+  const mediaRecoveryTimer = useRef<number | null>(null);
+  const recoveryAbort = useRef<AbortController | null>(null);
+  const recoveryPosition = useRef<number | null>(null);
+  const recoveryAttempts = useRef(0);
+  const clearMediaRecovery = useCallback(() => {
+    if (mediaRecoveryTimer.current !== null) window.clearTimeout(mediaRecoveryTimer.current);
+    mediaRecoveryTimer.current = null;
+  }, []);
+  const cancelMediaRecovery = useCallback(() => {
+    clearMediaRecovery();
+    recoveryAbort.current?.abort();
+    recoveryAbort.current = null;
+  }, [clearMediaRecovery]);
 
   useEffect(() => () => { resultGeneration.current++; }, []);
 
@@ -101,23 +115,30 @@ export function GameScreen({
   const startMedia = useCallback(async () => {
     const media = mediaRef.current;
     if (!media) return;
+    cancelMediaRecovery();
     const generation = ++playGeneration.current;
+    const controller = new AbortController();
+    recoveryAbort.current = controller;
     setMediaError(null);
     try {
-      await playVideo(media);
+      if (recoveryPosition.current !== null) await reloadMediaAtTime(media, recoveryPosition.current, controller.signal);
+      if (generation !== playGeneration.current) return;
+      await playMediaWithTimeout(media, controller.signal);
       if (generation !== playGeneration.current) return;
       pausedRef.current = false;
       setPaused(false);
       setGameStarted(true);
+      recoveryPosition.current = null;
+      recoveryAttempts.current = 0;
     } catch (error) {
       if (generation !== playGeneration.current) return;
       pausedRef.current = true;
       setPaused(true);
       setMediaError(`재생할 수 없습니다. ${(error as Error).message}`);
-    }
-  }, []);
+    } finally { if (recoveryAbort.current === controller) recoveryAbort.current = null; }
+  }, [cancelMediaRecovery]);
 
-  const cancelPlayback = useCallback(() => { playGeneration.current++; }, []);
+  const cancelPlayback = useCallback(() => { playGeneration.current++; cancelMediaRecovery(); }, [cancelMediaRecovery]);
   useEffect(() => {
     let cancelled = false;
     const media = mediaRef.current;
@@ -142,15 +163,61 @@ export function GameScreen({
 
   const pauseGame = useCallback(() => {
     playGeneration.current++;
+    cancelMediaRecovery();
     pausedRef.current = true;
     setPaused(true);
     pauseVideo(mediaRef.current);
     // A paused hold requires a fresh press on resume; it cannot auto-clear hands-free.
-    const t = applyTimingOffsetSec(getCurrentTimeSec(mediaRef.current), lockedTimingOffsetMs);
+    const t = applyTimingOffsetSec(recoveryPosition.current ?? getCurrentTimeSec(mediaRef.current), lockedTimingOffsetMs);
     setState((s) => ([0, 1, 2, 3] as Lane[]).reduce((next, lane) => attemptHoldRelease(next, lane, t), s));
     touchStarts.current.clear();
     setPressedLanes([false, false, false, false]);
-  }, [lockedTimingOffsetMs]);
+  }, [lockedTimingOffsetMs, cancelMediaRecovery]);
+
+  const recoverMedia = useCallback(async (reason: string) => {
+    const media = mediaRef.current;
+    if (!media || stateRef.current.finished || recoveryAbort.current) return;
+    // A preload error or a paused screen must never start itself.
+    if (!gameStarted || pausedRef.current) {
+      recoveryPosition.current ??= Number.isFinite(media.currentTime) ? media.currentTime : 0;
+      setMediaError(`${reason} · 재생 다시 시도를 눌러 주세요.`);
+      return;
+    }
+    recoveryPosition.current = Number.isFinite(media.currentTime) ? media.currentTime : 0;
+    pauseGame(); // freeze judgement and release held inputs before load() resets the clock
+    if (recoveryAttempts.current >= 2) {
+      setMediaError(`${reason} · 자동 복구 한도에 도달했습니다. 재생 다시 시도를 눌러 주세요.`);
+      return;
+    }
+    recoveryAttempts.current++;
+    const generation = playGeneration.current;
+    const controller = new AbortController();
+    recoveryAbort.current = controller;
+    setMediaError(`${reason} · 재생 복구 중…`);
+    try {
+      await reloadMediaAtTime(media, recoveryPosition.current, controller.signal);
+      if (generation !== playGeneration.current) return;
+      await playMediaWithTimeout(media, controller.signal);
+      if (generation !== playGeneration.current) return;
+      recoveryPosition.current = null;
+      setMediaError(null); pausedRef.current = false; setPaused(false);
+    } catch (error) {
+      if (generation !== playGeneration.current) return;
+      pauseVideo(media);
+      setMediaError(`${reason} · 재생 복구 실패: ${(error as Error).message}`);
+    } finally { if (recoveryAbort.current === controller) recoveryAbort.current = null; }
+  }, [gameStarted, pauseGame]);
+
+  const scheduleMediaRecovery = useCallback((reason: string) => {
+    if (!gameStarted || mediaRecoveryTimer.current !== null || pausedRef.current || stateRef.current.finished || recoveryAbort.current) return;
+    const generation = playGeneration.current;
+    mediaRecoveryTimer.current = window.setTimeout(() => {
+      mediaRecoveryTimer.current = null;
+      const media = mediaRef.current;
+      if (generation !== playGeneration.current || pausedRef.current || stateRef.current.finished) return;
+      if (media && !media.ended && media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) void recoverMedia(reason);
+    }, 3000);
+  }, [gameStarted, recoverMedia]);
 
   const handlePauseToggle = useCallback(() => {
     if (!gameStarted || stateRef.current.finished) return;
@@ -210,7 +277,9 @@ export function GameScreen({
   useInputManager(inputCallbacks, gameStarted && !state.finished, paused);
 
   const handleRestart = useCallback(() => {
-    playGeneration.current++;
+    cancelPlayback();
+    recoveryPosition.current = null;
+    recoveryAttempts.current = 0;
     pausedRef.current = false;
     setMediaError(null);
     touchStarts.current.clear();
@@ -229,11 +298,11 @@ export function GameScreen({
     else {
       void startMedia();
     }
-  }, [lockedTimingOffsetMs, requireStartGesture, startMedia]);
+  }, [lockedTimingOffsetMs, requireStartGesture, startMedia, cancelPlayback]);
 
   useEffect(() => {
-    if (state.finished) pauseVideo(mediaRef.current);
-  }, [state.finished]);
+    if (state.finished) { cancelPlayback(); pauseVideo(mediaRef.current); }
+  }, [state.finished, cancelPlayback]);
 
   const activeNotes = useMemo(
     () => state.notes.filter((n) => isNoteActive(n, currentTimeSec, lockedNoteSpeed)),
@@ -290,12 +359,15 @@ export function GameScreen({
 
   const videoFilter = `brightness(${mv.brightness}) blur(${mv.blurPx}px)`;
   const mediaNode = mediaKind === "audio" ? (
-    <audio ref={(node) => { mediaRef.current = node; }} src={mediaUrl} onError={() => { pauseGame(); setMediaError("오디오 파일을 재생할 수 없습니다."); }} preload="auto" />
+    <audio ref={(node) => { mediaRef.current = node; }} src={mediaUrl} onError={() => { void recoverMedia("오디오 파일 오류"); }} onStalled={() => scheduleMediaRecovery("오디오 로딩 지연")} onWaiting={() => scheduleMediaRecovery("오디오 버퍼링")} onPlaying={clearMediaRecovery} preload="auto" />
   ) : (
     <video
       ref={(node) => { mediaRef.current = node; }}
       src={mediaUrl}
-      onError={() => { pauseGame(); setMediaError("영상 파일을 재생할 수 없습니다."); }}
+      onError={() => { void recoverMedia("영상 파일 오류"); }}
+      onStalled={() => scheduleMediaRecovery("영상 로딩 지연")}
+      onWaiting={() => scheduleMediaRecovery("영상 버퍼링")}
+      onPlaying={clearMediaRecovery}
       muted={mediaMuted}
       playsInline
       preload="auto"

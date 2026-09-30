@@ -106,7 +106,7 @@ function App() {
       const bundle = await saveAnalysisToLibrary(payload, { nativeMedia });
       if (generation === analysisGeneration.current) setAnalysisBundle(bundle);
       await refreshLibrary();
-      if (bundle.song.mediaKind === "video" && !bundle.song.thumbnailUrl) {
+      if (bundle.song.mediaKind === "video" && !(bundle.song.originalThumbnail || bundle.song.thumbnailUrl)) {
         void captureThumbnail(bundle.song.mediaBlob ?? payload.mediaUrl).then(async (thumbnail) => {
           if (thumbnail) { await updateSongThumbnail(bundle.song.id, thumbnail); await refreshLibrary(); }
         }).catch(() => { /* Artwork failure must not invalidate a playable saved song. */ });
@@ -189,7 +189,6 @@ function App() {
     if (!currentChart) { setLibraryError("채보를 다시 선택해 주세요."); return; }
     const mediaUrl = mediaUrlForSong(bundle.song);
     if (!mediaUrl) { setLibraryError("이 곡의 미디어 파일을 찾을 수 없습니다. 다시 분석해 주세요."); return; }
-    if (libraryPlay?.mediaUrl.startsWith("blob:")) URL.revokeObjectURL(libraryPlay.mediaUrl);
     setLibraryPlay({ bundle, chart: currentChart, mediaUrl });
     setView("play");
   }

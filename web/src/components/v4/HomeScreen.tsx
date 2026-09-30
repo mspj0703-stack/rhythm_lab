@@ -1,3 +1,4 @@
+import { artworkForSong } from "../../library/db";
 import type { LibraryBundle } from "../../library/types";
 
 interface Props {
@@ -35,7 +36,7 @@ export function HomeScreen({ library, onOpenLibrary, onAddSong, onOpenSong, onSe
         <section className="recent-grid">
           {recent.map(({ song, charts }) => (
             <button key={song.id} className="song-card" onClick={() => onOpenSong(song.id)}>
-              <div className="song-art">{song.thumbnailUrl ? <img src={song.thumbnailUrl} alt=""/> : <span>{song.mediaKind === "video" ? "MV" : "♪"}</span>}</div>
+              <div className="song-art">{artworkForSong(song) ? <img src={artworkForSong(song)} alt=""/> : <span>{song.mediaKind === "video" ? "MV" : "♪"}</span>}</div>
               <div className="song-card-copy"><strong>{song.title}</strong><span>{song.bpm.toFixed(1)} BPM · {formatDuration(song.durationSec)}</span><small>{charts.length} chart{charts.length === 1 ? "" : "s"}</small></div>
             </button>
           ))}

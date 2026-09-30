@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { getBestRecordsForSong, getRecordsForChart, updateSongOffset, updateSongTitle } from "../../library/db";
+import { artworkForSong, getBestRecordsForSong, getRecordsForChart, updateSongCustomCover, updateSongOffset, updateSongTitle } from "../../library/db";
+import { prepareCustomCover } from "../../library/cover";
 import { loadAudioSettings, playNoticeSfx } from "../../audio/sfx";
 import { normalizeTimingOffsetMs } from "../../settings/timingOffset";
 import type { BestRecord, LibraryBundle, LibraryChart, PlayRecord } from "../../library/types";
@@ -33,6 +34,7 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
   const [selectedId, setSelectedId] = useState(bundle.charts[0]?.id ?? "");
   const [bests, setBests] = useState<Record<string, BestRecord | null>>({});
   const [records, setRecords] = useState<PlayRecord[]>([]);
+  const [coverBusy, setCoverBusy] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
   const selected = useMemo(() => bundle.charts.find((chart) => chart.id === selectedId) ?? bundle.charts[0], [bundle.charts, selectedId]);
   const existingDifficulties = useMemo(() => new Set(bundle.charts.map((chart) => chart.difficulty.toLowerCase())), [bundle.charts]);
@@ -51,6 +53,14 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
     return () => { cancelled = true; };
   }, [selected]);
 
+  async function changeCover(file?: File) {
+    if (!file || coverBusy) return;
+    setCoverBusy(true);
+    try { setError(null); await updateSongCustomCover(bundle.song.id, await prepareCustomCover(file)); onChanged(); }
+    catch (error) { setError((error as Error).message); }
+    finally { setCoverBusy(false); }
+  }
+  async function restoreOriginalCover() { if (coverBusy) return; try { setError(null); await updateSongCustomCover(bundle.song.id, undefined); onChanged(); } catch (error) { setError((error as Error).message); } }
   async function saveTitle() { try { setError(null); await updateSongTitle(bundle.song.id, title); onChanged(); } catch (error) { setError((error as Error).message); } }
   async function saveOffset(value: number) { const next = normalizeTimingOffsetMs(value); setOffset(next); try { setError(null); await updateSongOffset(bundle.song.id, next); onChanged(); } catch (error) { setError((error as Error).message); } }
   async function generate(difficulty: string) {
@@ -67,7 +77,7 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
       <header className="v4-topbar"><button className="text-back" onClick={onBack}>← LIBRARY</button><div className="brand-lockup compact"><span className="brand-mark">B</span><strong>SONG</strong></div><span/></header>
       {error && <p role="alert">{error}</p>}
       <section className="detail-hero">
-        <div className="detail-art">{bundle.song.thumbnailUrl ? <img src={bundle.song.thumbnailUrl} alt=""/> : <span>{bundle.song.mediaKind === "video" ? "MV" : "♪"}</span>}</div>
+        <div><div className="detail-art">{artworkForSong(bundle.song) ? <img src={artworkForSong(bundle.song)} alt=""/> : <span>{bundle.song.mediaKind === "video" ? "MV" : "♪"}</span>}</div><div className="cover-actions"><label className="small-primary">커버 변경<input hidden disabled={coverBusy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; void changeCover(file); }}/></label><button disabled={coverBusy || !bundle.song.customCover} onClick={() => void restoreOriginalCover()}>원본 썸네일로 되돌리기</button></div></div>
         <div className="detail-copy"><span className="eyebrow">LOCAL SONG</span><div className="title-edit"><input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => void saveTitle()} aria-label="곡 제목"/><button onClick={() => void saveTitle()}>SAVE</button></div><p>원본: {bundle.song.originalTitle}</p><div className="song-meta-pills"><span>{bundle.song.bpm.toFixed(1)} BPM</span><span>{Math.round(bundle.song.durationSec)} sec</span><span>{bundle.song.mediaKind.toUpperCase()}</span><span>추가: {new Date(bundle.song.createdAt).toLocaleDateString()}</span></div></div>
       </section>
 

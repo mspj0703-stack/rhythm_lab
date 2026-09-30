@@ -22,7 +22,8 @@
     "api:dev": "python3 -m uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload",
     "smoke:v3": "node scripts/v3_browser_review.cjs",
     "test:media": "python3 scripts/media_pipeline_review.py",
-    "smoke:v4": "node scripts/v4_browser_review.cjs"
+    "smoke:v4": "node scripts/v4_browser_review.cjs",
+    "smoke:hotfix": "node scripts/hotfix_browser_review.cjs"
   },
   "dependencies": {
     "react": "^19.2.8",

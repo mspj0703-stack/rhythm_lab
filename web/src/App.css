@@ -542,3 +542,8 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .song-art,.library-art,.detail-art { overflow:hidden; }
 .song-art img,.library-art img,.detail-art img { width:100%; height:100%; object-fit:cover; }
+
+.cover-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.cover-actions label, .cover-actions button { cursor:pointer; }
+.cover-actions button:disabled { opacity:.45; cursor:default; }
+.cover-actions button { width:100%; padding:8px 6px; border:1px solid #44375d; border-radius:10px; background:#171226; color:#cfc2e8; font:inherit; font-size:11px; white-space:normal; word-break:keep-all; }

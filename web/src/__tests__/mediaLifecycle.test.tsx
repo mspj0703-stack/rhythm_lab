@@ -127,3 +127,99 @@ describe("v4 asynchronous result persistence", () => {
     expect(container.textContent).not.toContain("NEW HIGH SCORE"); expect(debug().gameStarted).toBe(false);
   });
 });
+
+describe("hotfix bounded media recovery", () => {
+  const media = () => container.querySelector("video,audio") as HTMLMediaElement;
+  const dispatch = async (name: string) => { await act(async () => { media().dispatchEvent(new Event(name)); }); };
+  it("preload errors do not bypass the START gesture", async () => {
+    await render(); await dispatch("error");
+    expect(play).not.toHaveBeenCalled(); expect(debug().gameStarted).toBe(false);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("다시 시도");
+  });
+  it("freezes judgement during reload and restores position after metadata/seek", async () => {
+    await render(); await click("START"); await advance(1);
+    vi.mocked(HTMLMediaElement.prototype.load).mockImplementation(function(this: HTMLMediaElement) { this.currentTime = 0; });
+    await dispatch("error"); expect(debug().paused).toBe(true);
+    await advance(0); expect(debug().state.totalJudged).toBe(0);
+    const calls=play.mock.calls.length;
+    await dispatch("loadedmetadata"); expect(media().currentTime).toBe(1); expect(play).toHaveBeenCalledTimes(calls);
+    await dispatch("seeked"); expect(play).toHaveBeenCalledTimes(calls+1); expect(debug().paused).toBe(false);
+    await key("keydown", "d"); expect(debug().state.notes[0].status).toBe("hit");
+  });
+  it("background pause cancels pending recovery; explicit resume retains checkpoint", async () => {
+    await render(); await click("START"); await advance(1);
+    vi.mocked(HTMLMediaElement.prototype.load).mockImplementation(function(this: HTMLMediaElement) { this.currentTime=0; });
+    await dispatch("error");
+    await act(async () => { window.dispatchEvent(new Event("beatdash:pause")); });
+    await dispatch("loadedmetadata"); await dispatch("seeked"); expect(play).toHaveBeenCalledTimes(1); expect(debug().paused).toBe(true);
+    await key("keydown", "Escape"); await dispatch("loadedmetadata"); expect(media().currentTime).toBe(1);
+    await dispatch("seeked"); expect(debug().paused).toBe(false);
+  });
+  it("restart cancels recovery and never restores the old position", async () => {
+    await render(); await click("START"); await advance(2);
+    await dispatch("error"); await click("Restart");
+    await dispatch("loadedmetadata"); await dispatch("seeked");
+    expect(media().currentTime).toBe(0); expect(play).toHaveBeenCalledTimes(1); expect(debug().gameStarted).toBe(false);
+  });
+  it("leaving gameplay removes recovery listeners and prevents later play", async () => {
+    await render(); await click("START"); await advance(2); await dispatch("error"); const element=media();
+    await act(async () => root.render(null));
+    await act(async () => { element.dispatchEvent(new Event("loadedmetadata")); element.dispatchEvent(new Event("seeked")); });
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+  it("a persistent media error stops at one failed load without an error loop", async () => {
+    await render(); await click("START"); await dispatch("error");
+    await dispatch("error"); await dispatch("error");
+    expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(1); expect(play).toHaveBeenCalledTimes(1);
+    expect(debug().paused).toBe(true);
+  });
+  it("stalled timer does nothing after pause or before START", async () => {
+    vi.useFakeTimers();
+    try {
+      await render(); await dispatch("waiting"); await act(async () => vi.advanceTimersByTime(3001));
+      expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled();
+      await click("START"); await dispatch("stalled"); await key("keydown", "Escape");
+      await act(async () => vi.advanceTimersByTime(3001)); expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it("automatically recovers stalled playback only after the 3 second threshold", async () => {
+    vi.useFakeTimers();
+    try {
+      await render(); await click("START"); await advance(1); await dispatch("waiting");
+      await act(async () => vi.advanceTimersByTime(2999)); expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTime(1)); expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(1);
+      await dispatch("loadedmetadata"); await dispatch("seeked"); expect(debug().paused).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it("limits repeated automatic recoveries to two per run", async () => {
+    await render(); await click("START"); await advance(1);
+    for (let i=0;i<2;i++) { await dispatch("error"); await dispatch("loadedmetadata"); await dispatch("seeked"); }
+    await dispatch("error"); expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("한도"); expect(debug().paused).toBe(true);
+  });
+});
+
+it("recovery timeout leaves a visible retry action and paused judgement", async () => {
+  vi.useFakeTimers();
+  try {
+    await render(); await click("START"); await advance(1);
+    await act(async () => { container.querySelector('video')!.dispatchEvent(new Event('error')); });
+    await act(async () => vi.advanceTimersByTime(10001));
+    expect(debug().paused).toBe(true); expect(play).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("초과");
+  } finally { vi.useRealTimers(); }
+});
+
+it("a hung play promise becomes a retryable error instead of freezing recovery forever", async () => {
+  vi.useFakeTimers();
+  try {
+    await render(); await click("START"); await advance(1);
+    play.mockImplementationOnce(() => new Promise(() => {}));
+    await act(async () => { container.querySelector('video')!.dispatchEvent(new Event('error')); });
+    await act(async () => { container.querySelector('video')!.dispatchEvent(new Event('loadedmetadata')); });
+    await act(async () => { container.querySelector('video')!.dispatchEvent(new Event('seeked')); });
+    await act(async () => vi.advanceTimersByTime(10001));
+    expect(debug().paused).toBe(true);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("재생 응답 시간이 초과");
+  } finally { vi.useRealTimers(); }
+});

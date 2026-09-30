@@ -5,9 +5,10 @@ import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
+import org.json.JSONObject
 
 object YoutubeEngine {
-    data class ExtractedMedia(val audio: File, val video: File)
+    data class ExtractedMedia(val audio: File, val video: File, val originalTitle: String?, val thumbnail: File?)
     private var initialized = false
 
     private data class YoutubeStrategy(
@@ -53,6 +54,9 @@ object YoutubeEngine {
             addOption("--audio-format", "wav")
             addOption("--postprocessor-args", "ExtractAudio+ffmpeg_o:-ac 1 -ar 22050 -c:a pcm_s16le")
             addOption("--no-mtime")
+            addOption("--write-info-json")
+            addOption("--write-thumbnail")
+            addOption("--convert-thumbnails", "jpg")
             addOption("-o", File(dir, "source.%(ext)s").absolutePath)
         }
 
@@ -75,8 +79,11 @@ object YoutubeEngine {
                 val audio = File(dir, "source.wav")
                 check(video.isFile && video.length() in 1..(80L * 1024 * 1024)) { "완성된 MP4를 찾지 못했습니다." }
                 check(audio.isFile && audio.length() > 44) { "분석용 WAV 추출 실패" }
+                val info = File(dir, "source.info.json").takeIf { it.isFile }
+                val title = runCatching { info?.let { JSONObject(it.readText()).optString("title").takeIf(String::isNotBlank) } }.getOrNull()
+                val thumbnail = dir.listFiles()?.firstOrNull { it.isFile && it.name.matches(Regex("source\\.(jpg|jpeg)", RegexOption.IGNORE_CASE)) }
                 onProgress(100, "영상·음원 준비 완료")
-                return ExtractedMedia(audio, video)
+                return ExtractedMedia(audio, video, title, thumbnail)
             } catch (e: Exception) { lastError = e }
         }
         dir.deleteRecursively()

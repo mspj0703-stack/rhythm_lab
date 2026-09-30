@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
                     statusText.text = "AI 채보 분석 서버로 업로드 중…"
                 }
                 val result = RhythmApi.analyze(media.audio, difficulty, seed)
-                val song = store.save(result.analysis, media.audio, media.video, videoId)
+                val song = store.save(result.analysis, media.audio, media.video, videoId, media.originalTitle, media.thumbnail)
                 lastSongId = song.id
 
                 runOnUiThread {
