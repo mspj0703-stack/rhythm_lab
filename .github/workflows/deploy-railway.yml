@@ -45,7 +45,7 @@ jobs:
               try:
                   with urllib.request.urlopen(os.environ["HEALTH_URL"], timeout=10) as response:
                       health = json.load(response)
-                  if health.get("ok") and health.get("version") == "4.0.0" and health.get("revision") == os.environ["GITHUB_SHA"]:
+                  if health.get("ok") and health.get("version") == "4.75.0-rc.phase1" and health.get("revision") == os.environ["GITHUB_SHA"]:
                       print("PASS deployed revision", health["revision"])
                       break
               except Exception as error:
