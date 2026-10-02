@@ -35,6 +35,8 @@ export function saveAudioSettings(settings: AudioSettings): void {
   try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch { /* best effort */ }
 }
 
+export function initializeSfx(): boolean { return getContext() !== null; }
+
 function getContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
   const AudioCtx = window.AudioContext;
@@ -65,9 +67,14 @@ function tone(settings: AudioSettings, frequency: number, duration = 0.05, gain 
 
 export function playUiSfx(settings: AudioSettings): void { tone(settings, 620, 0.035, 0.07, 760); }
 export function playStartSfx(settings: AudioSettings): void { tone(settings, 440, 0.12, 0.10, 880); }
-export function playHitSfx(settings: AudioSettings, kind: "perfect" | "great" | "good" | "miss" | "flick" | "hold"): void {
-  const map = { perfect: 980, great: 820, good: 660, miss: 180, flick: 1180, hold: 520 } as const;
-  tone(settings, map[kind], kind === "miss" ? 0.09 : 0.045, kind === "miss" ? 0.05 : 0.08, kind === "flick" ? 1560 : undefined);
+export function playHitSfx(settings: AudioSettings, kind: "perfect" | "great" | "good" | "miss" | "flick" | "holdStart" | "holdComplete"): void {
+  // Short synthesized voices overlap naturally; no shared <audio> element means fast streams cannot cut each other off.
+  const spec = {
+    perfect: [1080, .038, .075, 1380], great: [880, .042, .068, 1080], good: [690, .046, .06, 760], miss: [170, .08, .04, 120],
+    flick: [1320, .055, .085, 2100], holdStart: [540, .055, .06, 680], holdComplete: [720, .075, .065, 1080],
+  } as const;
+  const [frequency, duration, gain, slide] = spec[kind];
+  tone(settings, frequency, duration, gain, slide);
 }
 export function playFullComboSfx(settings: AudioSettings): void { tone(settings, 660, 0.16, 0.12, 1320); setTimeout(() => tone(settings, 990, 0.18, 0.11, 1760), 90); }
 export function playPerfectComboSfx(settings: AudioSettings): void { tone(settings, 780, 0.18, 0.13, 1560); setTimeout(() => tone(settings, 1170, 0.22, 0.13, 2200), 90); setTimeout(() => tone(settings, 1560, 0.25, 0.12, 2600), 180); }

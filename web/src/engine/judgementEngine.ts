@@ -45,7 +45,16 @@ export function findNearestJudgeableNote(
     const diffMs = (currentTimeSec - n.note.time) * 1000;
     if (Math.abs(diffMs) > JUDGEMENT_MISS_WINDOW_MS + TIMING_EPSILON_MS) continue;
 
-    if (Math.abs(diffMs) < Math.abs(bestDiffMs)) {
+    const absDiff = Math.abs(diffMs);
+    const bestAbs = Math.abs(bestDiffMs);
+    const isCloser = absDiff < bestAbs - TIMING_EPSILON_MS;
+    const isTie = Math.abs(absDiff - bestAbs) <= TIMING_EPSILON_MS;
+    // Deterministic boundary choice: closest timing first; exact ties prefer the earlier chart time,
+    // then the stable runtime index. This prevents frame/order jitter around shared judgement windows.
+    const winsTie = isTie && best !== null && (
+      n.note.time < best.note.time || (n.note.time === best.note.time && n.index < best.index)
+    );
+    if (best === null || isCloser || winsTie) {
       best = n;
       bestDiffMs = diffMs;
     }

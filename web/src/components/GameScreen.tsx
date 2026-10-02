@@ -67,7 +67,6 @@ export function GameScreen({
   mediaUrl,
   mediaKind = "video",
   mediaMuted = true,
-  requireStartGesture = false,
   resultExtra,
   noteSpeed = DEFAULT_NOTE_SPEED,
   timingOffsetMs = DEFAULT_TIMING_OFFSET_MS,
@@ -84,7 +83,8 @@ export function GameScreen({
   const playGeneration = useRef(0);
   const [paused, setPaused] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(() => applyTimingOffsetSec(0, lockedTimingOffsetMs));
-  const [gameStarted, setGameStarted] = useState(!requireStartGesture);
+  const [gameStarted, setGameStarted] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(3);
   const [mv, setMv] = useState<MvOptions>({ on: preferences.backgroundVideo, brightness: preferences.backgroundBrightness, overlayOpacity: 0.5, blurPx: 0 });
   const [pressedLanes, setPressedLanes] = useState<boolean[]>([false, false, false, false]);
   const [songEnded, setSongEnded] = useState(false);
@@ -148,13 +148,24 @@ export function GameScreen({
   }, [cancelMediaRecovery]);
 
   const cancelPlayback = useCallback(() => { playGeneration.current++; cancelMediaRecovery(); }, [cancelMediaRecovery]);
+  useEffect(() => () => { cancelPlayback(); pauseVideo(mediaRef.current); }, [cancelPlayback]);
+
   useEffect(() => {
-    let cancelled = false;
-    const media = mediaRef.current;
-    // Defer autoplay so StrictMode cleanup can cancel the first mount attempt.
-    void Promise.resolve().then(() => { if (!cancelled && !requireStartGesture) void startMedia(); });
-    return () => { cancelled = true; cancelPlayback(); pauseVideo(media); };
-  }, [requireStartGesture, startMedia, cancelPlayback]);
+    if (gameStarted || showResult || pausedRef.current) return;
+    setCountdown(3);
+    let value = 3;
+    const timer = window.setInterval(() => {
+      value -= 1;
+      if (value <= 0) {
+        if (document.hidden || !document.hasFocus()) { value = 3; setCountdown(3); return; }
+        window.clearInterval(timer);
+        setCountdown(null);
+        playStartSfx(audioSettings);
+        void startMedia();
+      } else setCountdown(value);
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, [gameStarted, showResult, startMedia, audioSettings]);
 
   const loopActive = gameStarted && !songEnded;
 
@@ -169,7 +180,6 @@ export function GameScreen({
     setState((s) => tick(s, ended ? Number.POSITIVE_INFINITY : chartTimeSec));
   }, loopActive);
 
-  const handleStart = useCallback(() => { playStartSfx(audioSettings); void startMedia(); }, [startMedia, audioSettings]);
 
   const pauseGame = useCallback(() => {
     playGeneration.current++;
@@ -306,13 +316,9 @@ export function GameScreen({
     resultSoundPlayed.current = false;
     restartVideo(mediaRef.current);
     setGameStarted(false);
+    setCountdown(3);
   }, [lockedTimingOffsetMs, cancelPlayback]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!requireStartGesture && !gameStarted && !showResult) void Promise.resolve().then(() => { if (!cancelled) void startMedia(); });
-    return () => { cancelled = true; };
-  }, [requireStartGesture, gameStarted, showResult, startMedia]);
 
   useEffect(() => {
     if (!state.finished) return;
@@ -343,7 +349,8 @@ export function GameScreen({
     if (!feedback || feedback.sequence === lastSfxSequence.current) return;
     lastSfxSequence.current = feedback.sequence;
     if (preferences.vibration && supportsVibration() && feedback.judgement !== "Miss") navigator.vibrate(10);
-    if (feedback.phase === "hold_complete") playHitSfx(audioSettings, "hold");
+    if (feedback.phase === "hold_complete") playHitSfx(audioSettings, "holdComplete");
+    else if (feedback.phase === "hold_start") playHitSfx(audioSettings, "holdStart");
     else if (feedback.noteType === "flick" && feedback.judgement !== "Miss") playHitSfx(audioSettings, "flick");
     else playHitSfx(audioSettings, feedback.judgement.toLowerCase() as "perfect" | "great" | "good" | "miss");
   }, [state.lastFeedback, audioSettings, preferences.vibration]);
@@ -464,6 +471,7 @@ export function GameScreen({
           {state.combo > 0 && <div className="combo-number">{state.combo}</div>}
           {state.combo > 0 && <div className="combo-label">COMBO</div>}
         </div>
+        {preferences.perfectStreak && state.perfectStreak >= 2 && <div className="perfect-streak" aria-label={`Perfect streak ${state.perfectStreak}`}>PERFECT × {state.perfectStreak}</div>}
 
         <div className="lane-input-feedback" aria-hidden="true">
           {pressedLanes.map((pressed, lane) => <i key={lane} className={pressed && !state.finished ? "pressed" : ""} />)}
@@ -537,8 +545,8 @@ export function GameScreen({
               <span>READY</span>
               <strong>Speed {lockedNoteSpeed.toFixed(1)}</strong>
               {lockedTimingOffsetMs !== 0 && <span className="start-offset">Offset {lockedTimingOffsetMs > 0 ? "+" : ""}{lockedTimingOffsetMs}ms</span>}
-              <button onClick={handleStart}>START</button>
-              <small>키보드 D F J K · Flick: 레인 키 + Space · 터치: 누르기/홀드, 위로 밀기 = Flick</small>
+              <div className="countdown-number" role="status">{countdown ?? "GO"}</div>
+              <small>자동으로 시작합니다 · 키보드 D F J K · Flick: 레인 키 + Space · 터치: 누르기/홀드, 위로 밀기 = Flick</small>
             </div>
           </div>
         )}

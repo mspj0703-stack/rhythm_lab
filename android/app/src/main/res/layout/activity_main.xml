@@ -100,9 +100,53 @@
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:layout_marginTop="26dp"
-            android:text="채보 만들기"
+            android:text="현재 링크 대기열에 추가"
             android:textAllCaps="false"
             android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="여러 링크 한 번에 추가"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/batchUrlInput"
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:layout_marginTop="8dp"
+            android:gravity="top|start"
+            android:hint="YouTube 링크를 줄바꿈으로 붙여넣기"
+            android:inputType="textMultiLine|textUri"
+            android:padding="10dp"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#716B7D" />
+
+        <Button
+            android:id="@+id/batchAddButton"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="링크 모두 대기열에 추가"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="채보 생성 대기열"
+            android:textColor="#FFFFFF"
+            android:textSize="19sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/jobQueue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical" />
 
         <ProgressBar
             android:id="@+id/progressBar"

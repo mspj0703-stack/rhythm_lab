@@ -15,6 +15,7 @@ import { HomeScreen } from "./components/v4/HomeScreen";
 import { LibraryScreen } from "./components/v4/LibraryScreen";
 import { SongDetailScreen } from "./components/v4/SongDetailScreen";
 import { SettingsScreen } from "./components/v4/SettingsScreen";
+import { FeedbackScreen } from "./components/v4/FeedbackScreen";
 import { DEFAULT_AUDIO_SETTINGS, loadAudioSettings, playUiSfx, saveAudioSettings, type AudioSettings } from "./audio/sfx";
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences, type Preferences } from "./settings/preferences";
 import { DEFAULT_NOTE_SPEED } from "./settings/noteSpeed";
@@ -24,7 +25,7 @@ import "./App.css";
 
 const DEFAULT_VIDEO = "/test-video.mp4";
 
-type View = "home" | "library" | "upload" | "analysis" | "detail" | "play" | "settings";
+type View = "home" | "library" | "upload" | "analysis" | "detail" | "play" | "settings" | "feedback";
 
 interface Source { chartUrl: string | null; videoUrl: string; }
 interface LibraryPlay { bundle: LibraryBundle; chart: LibraryChart; mediaUrl: string; }
@@ -249,7 +250,8 @@ function App() {
 
   if (view === "home") return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
   if (view === "library") return <>{libraryErrorBanner}<LibraryScreen library={library} onBack={() => nav("home")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} /></>;
-  if (view === "settings") return <>{libraryErrorBanner}<SettingsScreen noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} settings={audioSettings} onChange={updateAudio} preferences={preferences} onPreferences={updatePreferences} onSongSettings={() => nav("library")} onReset={resetSettings} onBack={() => nav("home")} /></>;
+  if (view === "settings") return <>{libraryErrorBanner}<SettingsScreen onFeedback={() => nav("feedback")} noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} settings={audioSettings} onChange={updateAudio} preferences={preferences} onPreferences={updatePreferences} onSongSettings={() => nav("library")} onReset={resetSettings} onBack={() => nav("home")} /></>;
+  if (view === "feedback") return <FeedbackScreen onBack={() => nav("settings")} screen="settings" songTitle={selectedBundle?.song.title} />;
   if (view === "upload") return <>{libraryErrorBanner}<UploadScreen onBack={() => nav("home")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
 
   if (view === "detail") {

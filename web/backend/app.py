@@ -43,7 +43,11 @@ ANALYZE_SEMAPHORE = asyncio.Semaphore(ANALYZE_CONCURRENCY)
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".webm", ".mp4"}
 DIFFICULTIES = {"easy", "normal", "hard", "expert"}
 
-app = FastAPI(title="BEATDASH", version="4.75.0-rc.phase1")
+APP_VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+if not APP_VERSION:
+    raise RuntimeError("web/VERSION must not be empty")
+
+app = FastAPI(title="BEATDASH", version=APP_VERSION)
 
 
 class EvaluationPayload(BaseModel):

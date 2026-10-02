@@ -31,7 +31,7 @@ export function YouTubeEntry({ onComplete }: { onComplete: (value: AnalysisRespo
       if (!response.ok) throw new Error("request failed");
       const data = await response.json();
       if (abort.signal.aborted || !mounted.current) return;
-      if (generate) onComplete(data as AnalysisResponse);
+      if (generate) onComplete({ ...(data as AnalysisResponse), originalTitle: preview?.title, originalThumbnailUrl: preview?.thumbnail });
       else setPreview(data as VideoPreview);
     } catch {
       if (!abort.signal.aborted && mounted.current) setError(generate ? "채보를 만들지 못했습니다. 연결을 확인하고 다시 시도해 주세요. YouTube 접근 제한 시 Android 앱이나 파일 추가를 이용해 주세요." : "영상을 불러올 수 없습니다. 링크와 연결 상태를 확인해 주세요.");

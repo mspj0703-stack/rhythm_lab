@@ -1,5 +1,6 @@
 package com.rhythmlab.companion
 
+import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
 import android.text.Editable
@@ -13,6 +14,9 @@ import java.util.concurrent.TimeUnit
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.graphics.Color
 import android.app.AlertDialog
@@ -35,6 +39,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
     private lateinit var savedSongs: LinearLayout
+    private lateinit var batchUrlInput: EditText
+    private lateinit var batchAddButton: Button
+    private lateinit var jobQueue: LinearLayout
     private lateinit var pasteButton: Button
     private lateinit var previewButton: Button
     private lateinit var previewCard: LinearLayout
@@ -46,6 +53,14 @@ class MainActivity : AppCompatActivity() {
     private var previewGeneration = 0
     private val thumbnailClient = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build()
     private lateinit var store: SavedSongStore
+    private lateinit var jobStore: ChartJobStore
+    private val handler = Handler(Looper.getMainLooper())
+    private val queueRefresh = object : Runnable {
+        override fun run() {
+            if (::jobQueue.isInitialized) refreshJobs()
+            handler.postDelayed(this, 1000)
+        }
+    }
 
     private val executor = Executors.newSingleThreadExecutor()
     private var lastSongId: String? = null
@@ -54,6 +69,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         store = SavedSongStore(this)
+        jobStore = ChartJobStore(this)
 
         urlInput = findViewById(R.id.urlInput)
         difficultySpinner = findViewById(R.id.difficultySpinner)
@@ -63,6 +79,9 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         statusText = findViewById(R.id.statusText)
         savedSongs = findViewById(R.id.savedSongs)
+        batchUrlInput = findViewById(R.id.batchUrlInput)
+        batchAddButton = findViewById(R.id.batchAddButton)
+        jobQueue = findViewById(R.id.jobQueue)
 
         pasteButton = findViewById(R.id.pasteButton)
         previewButton = findViewById(R.id.previewButton)
@@ -108,13 +127,24 @@ class MainActivity : AppCompatActivity() {
 
         readSharedUrl(intent)?.let(urlInput::setText)
         startButton.setOnClickListener { startPipeline() }
+        batchAddButton.setOnClickListener { enqueueBatch() }
         openWebButton.setOnClickListener { lastSongId?.let(::openSong) }
+        jobStore.recoverInterrupted()
         refreshSongs()
+        refreshJobs()
+        if (jobStore.nextRunnable() != null) ChartJobService.start(this)
     }
 
     override fun onResume() {
         super.onResume()
         if (::savedSongs.isInitialized) refreshSongs()
+        handler.removeCallbacks(queueRefresh)
+        handler.post(queueRefresh)
+    }
+
+    override fun onPause() {
+        handler.removeCallbacks(queueRefresh)
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -125,6 +155,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         previewGeneration++
+        handler.removeCallbacks(queueRefresh)
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -200,61 +231,119 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startPipeline() {
-        if (busy) return
         val url = urlInput.text.toString().trim()
         if (previewUrl != url) { loadPreview(); return }
-        if (!isYoutubeUrl(url)) {
-            urlInput.error = "YouTube 링크를 입력해 주세요."
+        enqueueUrls(listOf(url))
+    }
+
+    private fun enqueueBatch() {
+        val urls = URL_REGEX.findAll(batchUrlInput.text.toString()).map { it.value.trimEnd('.', ',', ')', ']') }.distinct().toList()
+        if (urls.isEmpty()) {
+            batchUrlInput.error = "YouTube 링크를 하나 이상 입력해 주세요."
             return
         }
-        val videoId = extractVideoId(url)
-        if (videoId == null) {
-            urlInput.error = "영상 ID를 읽지 못했습니다."
-            return
-        }
+        enqueueUrls(urls)
+    }
+
+    private fun enqueueUrls(urls: List<String>) {
         val difficulty = difficultySpinner.selectedItem.toString().lowercase()
         val seed = seedInput.text.toString().toIntOrNull() ?: 42
-
-        setBusy(true)
-        statusText.text = "시작 중…"
-        openWebButton.visibility = View.GONE
-
-        executor.execute {
-            var audioFile: java.io.File? = null
-            var videoFile: java.io.File? = null
-            try {
-                val media = YoutubeEngine.extractMedia(this, url) { _, message ->
-                    ui {
-                        statusText.text = message
-                    }
-                }
-                audioFile = media.audio
-                videoFile = media.video
-
-                ui {
-                    statusText.text = "오디오 업로드 · BPM 분석 · 채보 생성 중…"
-                }
-                val result = RhythmApi.analyze(media.audio, difficulty, seed)
-                val song = store.save(result.analysis, media.audio, media.video, videoId, media.originalTitle, media.thumbnail)
-                lastSongId = song.id
-
-                ui {
-                    setBusy(false)
-                    statusText.text = "채보 저장 완료! 앱에서 플레이하는 중…"
-                    openWebButton.visibility = View.VISIBLE
-                    refreshSongs()
-                    openSong(song.id)
-                }
-            } catch (_: Exception) {
-                ui {
-                    setBusy(false)
-                    statusText.text = "채보를 만들지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요."
-                }
-            } finally {
-                audioFile?.delete()
-                videoFile?.delete()
+        var added = 0
+        var duplicates = 0
+        var invalid = 0
+        for (url in urls) {
+            if (!isYoutubeUrl(url)) { invalid++; continue }
+            val videoId = extractVideoId(url)
+            if (videoId == null) { invalid++; continue }
+            val before = jobStore.list().firstOrNull {
+                it.videoId == videoId && it.difficulty == difficulty && it.seed == seed && it.status !in ChartJobStore.TERMINAL
             }
+            jobStore.enqueue(url, difficulty, seed, videoId)
+            if (before == null) added++ else duplicates++
         }
+        if (added > 0) {
+            requestNotificationPermissionIfNeeded()
+            ChartJobService.start(this)
+            batchUrlInput.text?.clear()
+            statusText.text = buildString {
+                append("${added}곡을 대기열에 추가했습니다.")
+                if (duplicates > 0) append(" 중복 ${duplicates}개 제외.")
+                if (invalid > 0) append(" 잘못된 링크 ${invalid}개 제외.")
+            }
+        } else {
+            statusText.text = if (duplicates > 0) "같은 영상·난이도·seed 작업이 이미 대기열에 있습니다." else "추가할 수 있는 YouTube 링크가 없습니다."
+        }
+        refreshJobs()
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4752)
+        }
+    }
+
+    private fun refreshJobs() {
+        if (!::jobQueue.isInitialized) return
+        jobQueue.removeAllViews()
+        val jobs = jobStore.list().sortedByDescending { it.createdAt }.take(20)
+        if (jobs.isEmpty()) {
+            jobQueue.addView(TextView(this).apply { text = "대기 중인 작업이 없습니다."; setTextColor(Color.LTGRAY) })
+            return
+        }
+        for (job in jobs) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(12, 10, 12, 10)
+            }
+            val title = job.title ?: "YouTube · ${job.videoId}"
+            row.addView(TextView(this).apply {
+                text = "$title · ${job.difficulty.uppercase()}"
+                setTextColor(Color.WHITE)
+                textSize = 15f
+            })
+            row.addView(TextView(this).apply {
+                text = "${jobStatusLabel(job.status)} · ${job.message}"
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+            })
+            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            when (job.status) {
+                ChartJobStore.COMPLETED -> job.songId?.let { songId ->
+                    actions.addView(Button(this).apply {
+                        text = "플레이"
+                        isAllCaps = false
+                        setOnClickListener { openSong(songId) }
+                    })
+                }
+                ChartJobStore.FAILED, ChartJobStore.NEEDS_RETRY, ChartJobStore.CANCELED -> actions.addView(Button(this).apply {
+                    text = "재시도"
+                    isAllCaps = false
+                    setOnClickListener { ChartJobService.retry(this@MainActivity, job.id); refreshJobs() }
+                })
+                else -> actions.addView(Button(this).apply {
+                    text = "취소"
+                    isAllCaps = false
+                    setOnClickListener { ChartJobService.cancel(this@MainActivity, job.id); refreshJobs() }
+                })
+            }
+            if (actions.childCount > 0) row.addView(actions)
+            jobQueue.addView(row)
+        }
+        jobStore.list().firstOrNull { it.status == ChartJobStore.COMPLETED && it.songId != null }?.songId?.let { lastSongId = it }
+        refreshSongs()
+    }
+
+    private fun jobStatusLabel(status: String) = when (status) {
+        ChartJobStore.QUEUED -> "대기"
+        ChartJobStore.PREVIEWING -> "영상 확인"
+        ChartJobStore.PREPARING -> "영상·음원 준비"
+        ChartJobStore.ANALYZING -> "업로드·분석"
+        ChartJobStore.SAVING -> "저장"
+        ChartJobStore.COMPLETED -> "완료"
+        ChartJobStore.FAILED -> "실패"
+        ChartJobStore.CANCELED -> "취소"
+        ChartJobStore.NEEDS_RETRY -> "확인 필요"
+        else -> status
     }
 
     private fun setBusy(busy: Boolean) {
@@ -267,6 +356,8 @@ class MainActivity : AppCompatActivity() {
         urlInput.isEnabled = !busy
         difficultySpinner.isEnabled = !busy
         seedInput.isEnabled = !busy
+        batchAddButton.isEnabled = true
+        batchUrlInput.isEnabled = true
     }
 
     private fun openSong(id: String) {

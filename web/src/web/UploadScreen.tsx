@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { loadAudioSettings, playNoticeSfx } from "../audio/sfx";
 import type { AnalysisResponse } from "./types";
+import appVersion from "../../VERSION?raw";
 
 const DIFFICULTIES = ["easy", "normal", "hard", "expert"] as const;
 
@@ -34,7 +35,7 @@ export function UploadScreen({ onComplete, onBack }: Props) {
     <main className="lab-shell upload-shell">
       {onBack && <button className="text-back upload-back" onClick={onBack}>← HOME</button>}
       <header className="lab-header">
-        <div className="eyebrow">BEATDASH · v4.75 RC</div>
+        <div className="eyebrow">BEATDASH · v{appVersion.trim()}</div>
         <h1>BEATDASH</h1>
         <p>BEATDASH Android 앱은 YouTube 영상과 분석 음원을 기기에서 준비해 서버로 보내고, 이 웹 플레이어를 자동으로 엽니다.</p>
       </header>
