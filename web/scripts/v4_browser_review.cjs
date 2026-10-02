@@ -53,6 +53,9 @@ const payload = (id, title, difficulty = 'normal') => ({ id, originalName:'sourc
       await page.evaluate(t=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes(t)).click(),text);
       if(text==='START') await page.waitForFunction(()=>window.__RHYTHM_DEBUG__?.gameStarted && !window.__RHYTHM_DEBUG__.paused);
     };
+    const waitForAutoStart = async () => {
+      await page.waitForFunction(()=>window.__RHYTHM_DEBUG__?.gameStarted && !window.__RHYTHM_DEBUG__.paused, {timeout:5000});
+    };
     const stores = () => page.evaluate(async()=>{
       const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('BEATDASH_DB');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
       try { const read=name=>new Promise((resolve,reject)=>{const r=db.transaction(name).objectStore(name).getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
@@ -68,7 +71,7 @@ const payload = (id, title, difficulty = 'normal') => ({ id, originalName:'sourc
     await goto(); await page.waitForSelector('.song-card'); await page.click('.song-card'); await page.waitForSelector('.big-play');
     await page.click('.big-play'); await page.waitForSelector('.start-card');
     check('v3 note speed and global offset applied in Library', await page.evaluate(()=>window.__RHYTHM_DEBUG__.noteSpeed===12 && window.__RHYTHM_DEBUG__.timingOffsetMs===72));
-    await clickText('START');
+    await waitForAutoStart();
     await page.waitForFunction(()=>document.querySelector('video').currentTime>0);
     const advance = async time=>{
       await page.evaluate(t=>{const v=document.querySelector('video');v.pause();v.currentTime=t;},time);
@@ -79,7 +82,7 @@ const payload = (id, title, difficulty = 'normal') => ({ id, originalName:'sourc
     check('Perfect Combo and new score feedback', await page.$eval('.result-screen',e=>e.textContent.includes('PERFECT COMBO')&&e.textContent.includes('NEW HIGH SCORE')));
     let db=await stores(); check('record persisted with effective +72 and chart version',db.records.length===1&&db.records[0].offsetMs===72&&db.records[0].chartVersion===1);
     await page.screenshot({path:path.join(out,'mobile-perfect-combo.png'),fullPage:true});
-    await clickText('RETRY'); await clickText('START'); await advance(4); await page.evaluate(() => document.querySelector("video").dispatchEvent(new Event("ended")));
+    await clickText('RETRY'); await waitForAutoStart(); await advance(4); await page.evaluate(() => document.querySelector("video").dispatchEvent(new Event("ended")));
     await page.waitForSelector('.result-screen');
     await page.waitForFunction(()=>!document.querySelector('.result-achievements'));
     check('miss run does not show new high score',!(await page.$('.result-achievements')));
@@ -106,7 +109,7 @@ const payload = (id, title, difficulty = 'normal') => ({ id, originalName:'sourc
     await goto(); await page.waitForFunction(()=>document.querySelectorAll('.song-card').length===2);
     await page.evaluate(()=>Array.from(document.querySelectorAll('.song-card')).find(e=>e.textContent.includes('Uploaded Second')).click()); await page.waitForSelector('.big-play'); await page.click('.big-play'); await page.waitForSelector('video');
     check('web Library plays Blob URL',await page.$eval('video',v=>v.src.startsWith('blob:')));
-    await clickText('START'); await page.waitForFunction(()=>document.querySelector('video').currentTime>0); await advance(1.5);
+    await waitForAutoStart(); await page.waitForFunction(()=>document.querySelector('video').currentTime>0); await advance(1.5);
     check('Blob video seek uses the same judgement clock',await page.evaluate(()=>Math.abs(window.__RHYTHM_DEBUG__.currentTimeSec-1.428)<.02));
     await clickText('곡 상세'); await page.waitForSelector('.big-play'); await clickText('← LIBRARY');
     for(const [width,height] of [[390,844],[768,1024],[1440,900]]){

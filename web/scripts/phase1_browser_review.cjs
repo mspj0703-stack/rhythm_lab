@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const fs = require('node:fs');
 const path = require('node:path');
+const appVersion = fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8').trim();
 const assert = require('node:assert/strict');
 const checks = [];
 function check(name, value) { assert.ok(value, name); checks.push(name); console.log('PASS', name); }
@@ -28,7 +29,7 @@ function check(name, value) { assert.ok(value, name); checks.push(name); console
         await new Promise(r=>setTimeout(r,250));
         return request.respond({status:200,contentType:'application/json',body:JSON.stringify(payload)});
       }
-      if(u.pathname==='/api/health') return request.respond({status:200,contentType:'application/json',body:JSON.stringify({version:'4.75.0-rc.phase1',revision:'fixture-server'})});
+      if(u.pathname==='/api/health') return request.respond({status:200,contentType:'application/json',body:JSON.stringify({version:appVersion,revision:'fixture-server'})});
       return request.respond({status:404,contentType:'application/json',body:'{}'});
     });
     const goto=()=>page.goto('http://127.0.0.1:4185/');
@@ -52,7 +53,7 @@ function check(name, value) { assert.ok(value, name); checks.push(name); console
     await page.waitForSelector('.play-action');
     check('Preview and analysis use separate backend endpoints',calls.filter(c=>c.path==='/api/youtube-preview').length===1&&calls.filter(c=>c.path==='/api/analyze-youtube').length===1);
     await page.waitForFunction(async()=>{const q=indexedDB.open('BEATDASH_DB');return new Promise(r=>{q.onsuccess=()=>{const d=q.result;const t=d.transaction('songs').objectStore('songs').count();t.onsuccess=()=>{d.close();r(t.result===1);};};});});
-    await page.click('.play-action'); await page.waitForSelector('.start-card'); await click('START');
+    await page.click('.play-action'); await page.waitForSelector('.start-card'); await page.waitForFunction(()=>!document.querySelector('.start-overlay'),{timeout:10000});
     await page.waitForFunction(()=>window.__RHYTHM_DEBUG__.gameStarted&&!window.__RHYTHM_DEBUG__.paused);
     const advance=async t=>{await page.evaluate(t=>{const v=document.querySelector('video');v.pause();v.currentTime=t;},t);await page.waitForFunction(t=>Math.abs(window.__RHYTHM_DEBUG__.currentTimeSec-t)<.01,{},t);};
     await advance(1);await page.keyboard.press('d');await advance(2);await page.keyboard.press('f');await advance(4);

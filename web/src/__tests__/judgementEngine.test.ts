@@ -67,6 +67,12 @@ describe("findNearestJudgeableNote", () => {
     const target = findNearestJudgeableNote(notes, 0, 1.0);
     expect(target).toBeNull();
   });
+  it("uses deterministic earlier-note ordering when timing distance ties", () => {
+    const notes = [makeTap(1, 0.9), makeTap(0, 1.1)];
+    const target = findNearestJudgeableNote(notes, 0, 1.0);
+    expect(target?.note.time).toBe(0.9);
+  });
+
 });
 
 describe("Hold 판정", () => {

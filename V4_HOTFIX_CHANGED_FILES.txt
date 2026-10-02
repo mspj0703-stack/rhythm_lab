@@ -1,0 +1,15 @@
+android/app/src/main/java/com/rhythmlab/companion/MainActivity.kt
+android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt
+android/app/src/main/java/com/rhythmlab/companion/SavedSongStore.kt
+android/app/src/main/java/com/rhythmlab/companion/YoutubeEngine.kt
+web/src/App.css
+web/src/App.tsx
+web/src/__tests__/libraryDb.test.ts
+web/src/components/GameScreen.tsx
+web/src/components/v4/HomeScreen.tsx
+web/src/components/v4/LibraryScreen.tsx
+web/src/components/v4/SongDetailScreen.tsx
+web/src/library/cover.ts
+web/src/library/db.ts
+web/src/library/types.ts
+web/src/web/types.ts

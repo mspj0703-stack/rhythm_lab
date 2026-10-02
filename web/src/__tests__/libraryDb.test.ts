@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function mutate(stores: string[], action: (tx: IDBTransaction) => void) {
-  const request = indexedDB.open("BEATDASH_DB", 2);
+  const request = indexedDB.open("BEATDASH_DB", 3);
   const db = await new Promise<IDBDatabase>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
   try { await new Promise<void>((resolve, reject) => { const tx = db.transaction(stores, "readwrite"); tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error); action(tx); }); }
   finally { db.close(); }

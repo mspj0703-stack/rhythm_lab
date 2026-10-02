@@ -4,6 +4,10 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
+import android.webkit.JavascriptInterface
 import android.os.Bundle
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -18,6 +22,8 @@ import java.io.File
 import java.io.ByteArrayInputStream
 import java.io.FileInputStream
 import java.io.InputStream
+import java.io.ByteArrayOutputStream
+import org.json.JSONObject
 
 /** Plays the existing web game inside the app, serving saved sessions from private app storage. */
 class PlayActivity : AppCompatActivity() {
@@ -25,6 +31,25 @@ class PlayActivity : AppCompatActivity() {
     private lateinit var store: SavedSongStore
     private lateinit var songId: String
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private val coverPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null || !::webView.isInitialized) return@registerForActivityResult
+        try {
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
+            val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@registerForActivityResult
+            val scale = minOf(1f, 960f / maxOf(source.width, source.height).toFloat())
+            val resized = if (scale < 1f) Bitmap.createScaledBitmap(source, maxOf(1, (source.width * scale).toInt()), maxOf(1, (source.height * scale).toInt()), true) else source
+            val out = ByteArrayOutputStream()
+            resized.compress(Bitmap.CompressFormat.JPEG, 86, out)
+            if (resized !== source) resized.recycle()
+            source.recycle()
+            val dataUrl = "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            val quoted = JSONObject.quote(dataUrl)
+            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('beatdash:native-cover',{detail:$quoted}));", null)
+        } catch (_: Exception) { /* selection failure is non-destructive */ }
+    }
+    private inner class ArtworkBridge {
+        @JavascriptInterface fun pickCover() { runOnUiThread { coverPicker.launch("image/*") } }
+    }
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val callback = fileCallback
         fileCallback = null
@@ -51,6 +76,7 @@ class PlayActivity : AppCompatActivity() {
         webView.settings.domStorageEnabled = true
         webView.settings.mediaPlaybackRequiresUserGesture = false
         webView.settings.allowFileAccess = false
+        webView.addJavascriptInterface(ArtworkBridge(), "BeatdashArtwork")
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
                 fileCallback?.onReceiveValue(null)

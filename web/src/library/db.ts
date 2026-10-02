@@ -3,9 +3,10 @@ import type { AnalysisResponse } from "../web/types";
 import type { GameResult } from "../engine/resultCalculation";
 import { buildRecordFeedback, getClearType, makeSongFingerprint, summarizeRecords } from "./model";
 import type { BestRecord, LibraryBundle, LibraryChart, LibrarySong, PlayRecord, RecordFeedback } from "./types";
+import { persistOriginalThumbnail } from "./artwork";
 
 const DB_NAME = "BEATDASH_DB";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const SONGS = "songs";
 const CHARTS = "charts";
 const RECORDS = "playRecords";
@@ -49,8 +50,8 @@ async function openDb(): Promise<IDBDatabase> {
         store.createIndex("playedAt", "playedAt");
       }
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: "key" });
-      // v2 is additive: preserve all v3/v4 data and backfill artwork metadata in place.
-      if (event.oldVersion < 2 && tx && db.objectStoreNames.contains(SONGS)) {
+      // v2/v3 are additive: preserve all Library data and backfill artwork metadata in place.
+      if (event.oldVersion < 3 && tx && db.objectStoreNames.contains(SONGS)) {
         const store = tx.objectStore(SONGS);
         const cursor = store.openCursor();
         cursor.onsuccess = () => {
@@ -112,6 +113,8 @@ export async function saveAnalysisToLibrary(analysis: AnalysisResponse, options:
       await requestToPromise(tx.objectStore(SONGS).index("fingerprint").get(makeSongFingerprint(analysis.originalName, analysis.report.duration, analysis.chart.bpm || analysis.report.bpm))) as LibrarySong | undefined);
     if (legacy?.mediaBlob && await mediaFingerprint(legacy.mediaBlob) === fingerprint) legacyId = legacy.id;
   }
+  const sourceThumbnailUrl = (typeof analysis.originalThumbnailUrl === "string" ? analysis.originalThumbnailUrl.trim() : "") || undefined;
+  const persistentThumbnail = await persistOriginalThumbnail(sourceThumbnailUrl);
   return transaction([SONGS, CHARTS], "readwrite", async (tx) => {
     const songs = tx.objectStore(SONGS);
     const existing = await requestToPromise(options.songId ? songs.get(options.songId) : songs.index("fingerprint").get(fingerprint)) as LibrarySong | undefined;
@@ -119,7 +122,7 @@ export async function saveAnalysisToLibrary(analysis: AnalysisResponse, options:
     if (options.songId && !old) throw new Error("곡이 삭제되었습니다. Library에서 다시 선택해 주세요.");
     const now = Date.now();
     const sourceOriginalTitle = (typeof analysis.originalTitle === "string" ? analysis.originalTitle.trim() : "") || analysis.chart.title?.trim() || analysis.originalName;
-    const sourceThumbnail = (typeof analysis.originalThumbnailUrl === "string" ? analysis.originalThumbnailUrl.trim() : "") || undefined;
+    const sourceThumbnail = persistentThumbnail;
     const song: LibrarySong = old ? {
       ...old,
       fingerprint: options.songId ? old.fingerprint : fingerprint,

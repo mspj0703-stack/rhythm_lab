@@ -2,6 +2,7 @@ import { YouTubeEntry } from "../../web/YouTubeEntry";
 import type { AnalysisResponse } from "../../web/types";
 import { artworkForSong } from "../../library/db";
 import type { LibraryBundle } from "../../library/types";
+import appVersion from "../../../VERSION?raw";
 
 interface Props {
   library: LibraryBundle[];
@@ -23,7 +24,7 @@ export function HomeScreen({ library, onOpenLibrary, onAddSong, onOpenSong, onSe
   return (
     <main className="v4-shell">
       <header className="v4-topbar">
-        <div className="brand-lockup"><span className="brand-mark">B</span><div><strong>BEATDASH</strong><small>v4.75 RC · Phase 1</small></div></div>
+        <div className="brand-lockup"><span className="brand-mark">B</span><div><strong>BEATDASH</strong><small>v{appVersion.trim()}</small></div></div>
         <button className="icon-action" onClick={onSettings} aria-label="설정">⚙</button>
       </header>
 

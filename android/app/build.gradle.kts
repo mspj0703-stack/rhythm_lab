@@ -5,6 +5,17 @@ plugins {
 
 val companionKeystore = System.getenv("COMPANION_KEYSTORE_PATH")
 val companionPassword = System.getenv("COMPANION_KEYSTORE_PASSWORD")
+val beatdashVersion = rootProject.file("../web/VERSION").readText().trim().also {
+    require(it.isNotBlank()) { "web/VERSION must not be empty" }
+}
+val versionCore = beatdashVersion.substringBefore("-").split(".")
+require(versionCore.size == 3) { "VERSION must start with major.minor.patch" }
+val versionMajor = versionCore[0].toInt()
+val versionMinor = versionCore[1].toInt()
+val versionPatch = versionCore[2].toInt()
+val buildSequence = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1) % 10000
+val beatdashVersionCode = versionMajor * 100_000_000 + versionMinor * 1_000_000 + versionPatch * 10_000 + buildSequence
+
 
 android {
     namespace = "com.rhythmlab.companion"
@@ -14,9 +25,9 @@ android {
         applicationId = "com.rhythmlab.companion"
         minSdk = 26
         targetSdk = 35
-        // This workflow's run number increases for each signed APK.
-        versionCode = 475000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
-        versionName = "4.75.0-rc.phase1"
+        // Release identity comes from web/VERSION; CI run number only makes APK builds monotonic within that release.
+        versionCode = beatdashVersionCode
+        versionName = beatdashVersion
     }
 
     if (companionKeystore != null && companionPassword != null) {

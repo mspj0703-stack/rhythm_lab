@@ -48,6 +48,21 @@ describe("Tap 판정 및 콤보/정확도", () => {
     expect(state.combo).toBe(0); // Miss로 콤보 초기화
   });
 
+  it("Perfect Streak는 Perfect에서만 이어지고 Great/Good에서 종료된다", () => {
+    let state = createInitialGameState(makeChart(), { failEnabled: false });
+    state = attemptTap(state, 0, 1.0);
+    state = attemptTap(state, 1, 2.0);
+    expect(state.perfectStreak).toBe(2);
+    expect(state.maxPerfectStreak).toBe(2);
+    const chart2 = makeChart({ notes: [{ time: 1, lane: 0, type: "tap" }, { time: 2, lane: 1, type: "tap" }] });
+    state = createInitialGameState(chart2, { failEnabled: false });
+    state = attemptTap(state, 0, 1.0);
+    state = attemptTap(state, 1, 2.05);
+    expect(state.combo).toBe(2);
+    expect(state.perfectStreak).toBe(0);
+    expect(state.maxPerfectStreak).toBe(1);
+  });
+
   it("12. Accuracy 계산이 판정 가중치를 정확히 반영한다", () => {
     let state = createInitialGameState(makeChart(), { failEnabled: false });
     state = attemptTap(state, 0, 1.0); // diff 0ms -> Perfect (weight 1.0)

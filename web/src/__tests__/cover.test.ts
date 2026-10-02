@@ -14,3 +14,9 @@ it.each(["image/jpeg","image/png","image/webp"])("converts %s at max 960 edge an
 it("accepts an Android image filename with empty MIME",async()=>{expect(await prepareCustomCover(new File(["x"],"cover.PNG"))).toContain("image/jpeg");});
 it("rejects non-image input",async()=>{await expect(prepareCustomCover(new File(["x"],"cover.svg",{type:"image/svg+xml"}))).rejects.toThrow("JPG");});
 it("closes bitmap even if canvas encoding fails",async()=>{vi.mocked(HTMLCanvasElement.prototype.toDataURL).mockImplementation(()=>{throw new Error("encode failed");});await expect(prepareCustomCover(new File(["x"],"c.jpg",{type:"image/jpeg"}))).rejects.toThrow("encode failed");expect(close).toHaveBeenCalledOnce();});
+
+it("persists a remote original thumbnail as image bytes instead of its URL", async () => {
+  const { persistOriginalThumbnail } = await import("../library/artwork");
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["img"], { type: "image/jpeg" }), { status: 200 })));
+  expect(await persistOriginalThumbnail("https://example.test/thumb.jpg")).toBe("data:image/jpeg;size=960x540");
+});
