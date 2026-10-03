@@ -37,7 +37,6 @@ interface Props {
   mediaUrl: string;
   mediaKind?: "audio" | "video";
   mediaMuted?: boolean;
-  requireStartGesture?: boolean;
   resultExtra?: ReactNode;
   /** 1.0~20.0. 시각적 스크롤만 바꾸고 chart/media/judgement time은 바꾸지 않는다. */
   noteSpeed?: number;
@@ -46,6 +45,8 @@ interface Props {
   audioSettings?: AudioSettings;
   onResult?: (result: GameResult) => RecordFeedback | void | Promise<RecordFeedback | void>;
 }
+
+type StartupPhase = "preparing" | "countdown" | "playing";
 
 interface MvOptions {
   on: boolean;
@@ -84,6 +85,9 @@ export function GameScreen({
   const [paused, setPaused] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(() => applyTimingOffsetSec(0, lockedTimingOffsetMs));
   const [gameStarted, setGameStarted] = useState(false);
+  const [startupPhase, setStartupPhase] = useState<StartupPhase>("preparing");
+  const [mediaPrepared, setMediaPrepared] = useState(false);
+  const [lifecycleBlocked, setLifecycleBlocked] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(3);
   const [mv, setMv] = useState<MvOptions>({ on: preferences.backgroundVideo, brightness: preferences.backgroundBrightness, overlayOpacity: 0.5, blurPx: 0 });
   const [pressedLanes, setPressedLanes] = useState<boolean[]>([false, false, false, false]);
@@ -103,6 +107,7 @@ export function GameScreen({
   const resultSoundPlayed = useRef(false);
   const lastSfxSequence = useRef<number | null>(null);
   const mediaRecoveryTimer = useRef<number | null>(null);
+  const startupGeneration = useRef(0);
   const recoveryAbort = useRef<AbortController | null>(null);
   const recoveryPosition = useRef<number | null>(null);
   const recoveryAttempts = useRef(0);
@@ -137,35 +142,50 @@ export function GameScreen({
       pausedRef.current = false;
       setPaused(false);
       setGameStarted(true);
+      setStartupPhase("playing");
       recoveryPosition.current = null;
       recoveryAttempts.current = 0;
     } catch (error) {
       if (generation !== playGeneration.current) return;
-      pausedRef.current = true;
-      setPaused(true);
+      pausedRef.current = false;
+      setPaused(false);
+      setStartupPhase("preparing");
       setMediaError(`재생할 수 없습니다. ${(error as Error).message}`);
     } finally { if (recoveryAbort.current === controller) recoveryAbort.current = null; }
   }, [cancelMediaRecovery]);
 
   const cancelPlayback = useCallback(() => { playGeneration.current++; cancelMediaRecovery(); }, [cancelMediaRecovery]);
-  useEffect(() => () => { cancelPlayback(); pauseVideo(mediaRef.current); }, [cancelPlayback]);
+  useEffect(() => {
+    const media = mediaRef.current;
+    return () => { cancelPlayback(); pauseVideo(media); };
+  }, [cancelPlayback]);
+
+  const markMediaPrepared = useCallback(() => { setMediaPrepared(true); }, []);
 
   useEffect(() => {
-    if (gameStarted || showResult || pausedRef.current) return;
+    if (startupPhase !== "preparing" || !mediaPrepared || mediaError || lifecycleBlocked || gameStarted || showResult || pausedRef.current || document.hidden) return;
     setCountdown(3);
+    setStartupPhase("countdown");
+  }, [startupPhase, mediaPrepared, mediaError, lifecycleBlocked, gameStarted, showResult]);
+
+  useEffect(() => {
+    if (startupPhase !== "countdown" || gameStarted || showResult) return;
+    const generation = ++startupGeneration.current;
     let value = 3;
+    setCountdown(value);
     const timer = window.setInterval(() => {
+      if (generation !== startupGeneration.current) { window.clearInterval(timer); return; }
+      if (document.hidden) { window.clearInterval(timer); setCountdown(3); setStartupPhase("preparing"); return; }
       value -= 1;
       if (value <= 0) {
-        if (document.hidden || !document.hasFocus()) { value = 3; setCountdown(3); return; }
         window.clearInterval(timer);
         setCountdown(null);
         playStartSfx(audioSettings);
         void startMedia();
       } else setCountdown(value);
     }, 700);
-    return () => window.clearInterval(timer);
-  }, [gameStarted, showResult, startMedia, audioSettings]);
+    return () => { startupGeneration.current++; window.clearInterval(timer); };
+  }, [startupPhase, gameStarted, showResult, startMedia, audioSettings]);
 
   const loopActive = gameStarted && !songEnded;
 
@@ -246,17 +266,36 @@ export function GameScreen({
   }, [gameStarted, songEnded, startMedia, pauseGame]);
 
   useEffect(() => {
-    const hide = () => { if (document.hidden && gameStarted && !songEnded) pauseGame(); };
-    const blur = () => { if (gameStarted && !songEnded) pauseGame(); };
-    document.addEventListener("visibilitychange", hide);
-    window.addEventListener("blur", blur);
-    window.addEventListener("beatdash:pause", blur);
-    return () => {
-      document.removeEventListener("visibilitychange", hide);
-      window.removeEventListener("blur", blur);
-      window.removeEventListener("beatdash:pause", blur);
+    const freeze = () => {
+      if (songEnded || showResult) return;
+      if (gameStarted) { pauseGame(); return; }
+      startupGeneration.current++;
+      setLifecycleBlocked(true);
+      cancelPlayback();
+      pauseVideo(mediaRef.current);
+      setCountdown(3);
+      setStartupPhase("preparing");
     };
-  }, [gameStarted, songEnded, pauseGame]);
+    const resumeStartup = () => {
+      if (gameStarted || songEnded || showResult) return;
+      setLifecycleBlocked(false);
+      setCountdown(3);
+      setStartupPhase("preparing");
+    };
+    const visibility = () => { if (document.hidden) freeze(); else resumeStartup(); };
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("blur", freeze);
+    window.addEventListener("focus", resumeStartup);
+    window.addEventListener("beatdash:pause", freeze);
+    window.addEventListener("beatdash:resume", resumeStartup);
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("blur", freeze);
+      window.removeEventListener("focus", resumeStartup);
+      window.removeEventListener("beatdash:pause", freeze);
+      window.removeEventListener("beatdash:resume", resumeStartup);
+    };
+  }, [gameStarted, songEnded, showResult, mediaPrepared, pauseGame, cancelPlayback]);
 
   const setLanePressed = useCallback((lane: Lane, pressed: boolean) => {
     setPressedLanes((prev) => {
@@ -315,7 +354,10 @@ export function GameScreen({
     reportedResult.current = false;
     resultSoundPlayed.current = false;
     restartVideo(mediaRef.current);
+    startupGeneration.current++;
     setGameStarted(false);
+    setStartupPhase("preparing");
+    setMediaPrepared(Boolean(mediaRef.current && mediaRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA));
     setCountdown(3);
   }, [lockedTimingOffsetMs, cancelPlayback]);
 
@@ -383,21 +425,25 @@ export function GameScreen({
       currentTimeSec,
       paused,
       gameStarted,
+      startupPhase,
+      lifecycleBlocked,
       noteSpeed: lockedNoteSpeed,
       timingOffsetMs: lockedTimingOffsetMs,
     };
-  }, [state, currentTimeSec, paused, gameStarted, lockedNoteSpeed, lockedTimingOffsetMs]);
+  }, [state, currentTimeSec, paused, gameStarted, startupPhase, lifecycleBlocked, lockedNoteSpeed, lockedTimingOffsetMs]);
 
   const handleEnded = () => { setPaused(false); setState(s => tick(s, Number.POSITIVE_INFINITY)); setSongEnded(true); };
 
   const videoFilter = `brightness(${mv.brightness}) blur(${mv.blurPx}px)`;
   const mediaNode = mediaKind === "audio" ? (
-    <audio onEnded={handleEnded} ref={(node) => { mediaRef.current = node; }} src={mediaUrl} onError={() => { void recoverMedia("오디오 파일 오류"); }} onStalled={() => scheduleMediaRecovery("오디오 로딩 지연")} onWaiting={() => scheduleMediaRecovery("오디오 버퍼링")} onPlaying={clearMediaRecovery} preload="auto" />
+    <audio onEnded={handleEnded} ref={(node) => { mediaRef.current = node; }} src={mediaUrl} onLoadedMetadata={markMediaPrepared} onCanPlay={markMediaPrepared} onError={() => { void recoverMedia("오디오 파일 오류"); }} onStalled={() => scheduleMediaRecovery("오디오 로딩 지연")} onWaiting={() => scheduleMediaRecovery("오디오 버퍼링")} onPlaying={clearMediaRecovery} preload="auto" />
   ) : (
     <video
       onEnded={handleEnded}
       ref={(node) => { mediaRef.current = node; }}
       src={mediaUrl}
+      onLoadedMetadata={markMediaPrepared}
+      onCanPlay={markMediaPrepared}
       onError={() => { void recoverMedia("영상 파일 오류"); }}
       onStalled={() => scheduleMediaRecovery("영상 로딩 지연")}
       onWaiting={() => scheduleMediaRecovery("영상 버퍼링")}
@@ -545,13 +591,23 @@ export function GameScreen({
               <span>READY</span>
               <strong>Speed {lockedNoteSpeed.toFixed(1)}</strong>
               {lockedTimingOffsetMs !== 0 && <span className="start-offset">Offset {lockedTimingOffsetMs > 0 ? "+" : ""}{lockedTimingOffsetMs}ms</span>}
-              <div className="countdown-number" role="status">{countdown ?? "GO"}</div>
-              <small>자동으로 시작합니다 · 키보드 D F J K · Flick: 레인 키 + Space · 터치: 누르기/홀드, 위로 밀기 = Flick</small>
+              {startupPhase === "preparing" ? <div className="countdown-number preparing" role="status">READY</div> : <div className="countdown-number" role="status">{countdown ?? "GO"}</div>}
+              <small>{startupPhase === "preparing" ? "미디어 준비 중… 준비가 끝나면 3·2·1 후 자동 시작합니다." : "자동으로 시작합니다 · 키보드 D F J K · Flick: 레인 키 + Space · 터치: 누르기/홀드, 위로 밀기 = Flick"}</small>
             </div>
           </div>
         )}
-        {mediaError && <div className="media-error" role="alert"><p>{mediaError}</p><button onClick={() => { mediaRef.current?.load(); void startMedia(); }}>재생 다시 시도</button></div>}
-        {paused && <PauseOverlay onResume={handlePauseToggle} onRestart={handleRestart} />}
+        {mediaError && <div className="media-error" role="alert"><p>{mediaError}</p><button onClick={() => {
+          const media = mediaRef.current;
+          setMediaError(null);
+          if (gameStarted) { void startMedia(); return; }
+          cancelPlayback();
+          startupGeneration.current++;
+          setMediaPrepared(false);
+          setCountdown(3);
+          setStartupPhase("preparing");
+          media?.load();
+        }}>재생 다시 시도</button></div>}
+        {paused && gameStarted && <PauseOverlay onResume={handlePauseToggle} onRestart={handleRestart} />}
       </div>
 
       {mediaKind === "video" && (

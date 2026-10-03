@@ -1,0 +1,2093 @@
+diff --git a/.github/workflows/build-android.yml b/.github/workflows/build-android.yml
+index 9af5d3d..414d4dc 100644
+--- a/.github/workflows/build-android.yml
++++ b/.github/workflows/build-android.yml
+@@ -6,6 +6,7 @@ on:
+     branches: [ main ]
+     paths:
+       - 'android/**'
++      - 'web/VERSION'
+       - '.github/workflows/build-android.yml'
+ 
+ jobs:
+@@ -50,7 +51,13 @@ jobs:
+         run: |
+           APK=android/app/build/outputs/apk/release/app-release.apk
+           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:'
++          EXPECTED_VERSION="$(tr -d '\r\n' < web/VERSION)"
++          BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:')"
++          echo "$BADGING"
++          echo "$BADGING" | grep -F "versionName='$EXPECTED_VERSION'" >/dev/null || {
++            echo "APK versionName does not match web/VERSION ($EXPECTED_VERSION)"
++            exit 1
++          }
+       - uses: actions/upload-artifact@v4
+         with:
+           name: beatdash-android-signed
+diff --git a/android/app/src/main/java/com/rhythmlab/companion/MainActivity.kt b/android/app/src/main/java/com/rhythmlab/companion/MainActivity.kt
+index 00e41c6..dfa944a 100644
+--- a/android/app/src/main/java/com/rhythmlab/companion/MainActivity.kt
++++ b/android/app/src/main/java/com/rhythmlab/companion/MainActivity.kt
+@@ -19,6 +19,10 @@ import android.os.Handler
+ import android.os.Looper
+ import android.view.View
+ import android.graphics.Color
++import android.graphics.drawable.GradientDrawable
++import android.view.Gravity
++import android.view.ViewGroup
++import android.widget.FrameLayout
+ import android.app.AlertDialog
+ import android.widget.ArrayAdapter
+ import android.widget.Button
+@@ -42,6 +46,8 @@ class MainActivity : AppCompatActivity() {
+     private lateinit var batchUrlInput: EditText
+     private lateinit var batchAddButton: Button
+     private lateinit var jobQueue: LinearLayout
++    private lateinit var queueSummary: TextView
++    private lateinit var contentContainer: LinearLayout
+     private lateinit var pasteButton: Button
+     private lateinit var previewButton: Button
+     private lateinit var previewCard: LinearLayout
+@@ -82,6 +88,9 @@ class MainActivity : AppCompatActivity() {
+         batchUrlInput = findViewById(R.id.batchUrlInput)
+         batchAddButton = findViewById(R.id.batchAddButton)
+         jobQueue = findViewById(R.id.jobQueue)
++        queueSummary = findViewById(R.id.queueSummary)
++        contentContainer = findViewById(R.id.contentContainer)
++        applyResponsiveContentWidth()
+ 
+         pasteButton = findViewById(R.id.pasteButton)
+         previewButton = findViewById(R.id.previewButton)
+@@ -118,11 +127,9 @@ class MainActivity : AppCompatActivity() {
+         }
+ 
+         val difficulties = listOf("Easy", "Normal", "Hard", "Expert")
+-        difficultySpinner.adapter = ArrayAdapter(
+-            this,
+-            android.R.layout.simple_spinner_dropdown_item,
+-            difficulties,
+-        )
++        difficultySpinner.adapter = ArrayAdapter(this, R.layout.spinner_item, difficulties).also {
++            it.setDropDownViewResource(R.layout.spinner_dropdown_item)
++        }
+         difficultySpinner.setSelection(2)
+ 
+         readSharedUrl(intent)?.let(urlInput::setText)
+@@ -285,51 +292,75 @@ class MainActivity : AppCompatActivity() {
+     private fun refreshJobs() {
+         if (!::jobQueue.isInitialized) return
+         jobQueue.removeAllViews()
+-        val jobs = jobStore.list().sortedByDescending { it.createdAt }.take(20)
++        val allJobs = jobStore.list().sortedByDescending { it.createdAt }
++        val jobs = allJobs.take(20)
++        val activeCount = allJobs.count { it.status !in ChartJobStore.TERMINAL && it.status != ChartJobStore.NEEDS_RETRY }
++        queueSummary.text = if (allJobs.isEmpty()) "작업 없음" else "작업 ${allJobs.size}개 · 진행 ${activeCount}개"
+         if (jobs.isEmpty()) {
+-            jobQueue.addView(TextView(this).apply { text = "대기 중인 작업이 없습니다."; setTextColor(Color.LTGRAY) })
++            jobQueue.addView(TextView(this).apply {
++                text = "대기 중인 작업이 없습니다."
++                setTextColor(Color.parseColor("#8D859A"))
++                textSize = 13f
++                setPadding(0, dp(8), 0, dp(2))
++            })
+             return
+         }
+-        for (job in jobs) {
++        for ((index, job) in jobs.withIndex()) {
+             val row = LinearLayout(this).apply {
+                 orientation = LinearLayout.VERTICAL
+-                setPadding(12, 10, 12, 10)
++                setPadding(dp(14), dp(13), dp(14), dp(13))
++                background = roundedPanel("#100E16", "#2D2638", 16f)
++                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
++                    if (index > 0) topMargin = dp(9)
++                }
++            }
++            val header = LinearLayout(this).apply {
++                orientation = LinearLayout.HORIZONTAL
++                gravity = Gravity.CENTER_VERTICAL
+             }
+             val title = job.title ?: "YouTube · ${job.videoId}"
+-            row.addView(TextView(this).apply {
+-                text = "$title · ${job.difficulty.uppercase()}"
++            header.addView(TextView(this).apply {
++                text = title
++                maxLines = 2
++                ellipsize = android.text.TextUtils.TruncateAt.END
+                 setTextColor(Color.WHITE)
+                 textSize = 15f
++                setTypeface(typeface, android.graphics.Typeface.BOLD)
++            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
++            header.addView(statusBadge(job.status))
++            row.addView(header)
++            row.addView(TextView(this).apply {
++                text = "${job.difficulty.uppercase()} · seed ${job.seed}"
++                setTextColor(Color.parseColor("#A99CB8"))
++                textSize = 11f
++                setPadding(0, dp(7), 0, 0)
+             })
+             row.addView(TextView(this).apply {
+-                text = "${jobStatusLabel(job.status)} · ${job.message}"
+-                setTextColor(Color.LTGRAY)
++                text = job.message
++                setTextColor(Color.parseColor("#C6BFCE"))
+                 textSize = 12f
++                setPadding(0, dp(5), 0, 0)
+             })
+-            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
++            val actions = LinearLayout(this).apply {
++                orientation = LinearLayout.HORIZONTAL
++                gravity = Gravity.END
++                setPadding(0, dp(8), 0, 0)
++            }
+             when (job.status) {
+                 ChartJobStore.COMPLETED -> job.songId?.let { songId ->
+-                    actions.addView(Button(this).apply {
+-                        text = "플레이"
+-                        isAllCaps = false
+-                        setOnClickListener { openSong(songId) }
+-                    })
++                    actions.addView(queueActionButton("플레이", primary = true) { openSong(songId) })
+                 }
+-                ChartJobStore.FAILED, ChartJobStore.NEEDS_RETRY, ChartJobStore.CANCELED -> actions.addView(Button(this).apply {
+-                    text = "재시도"
+-                    isAllCaps = false
+-                    setOnClickListener { ChartJobService.retry(this@MainActivity, job.id); refreshJobs() }
+-                })
+-                else -> actions.addView(Button(this).apply {
+-                    text = "취소"
+-                    isAllCaps = false
+-                    setOnClickListener { ChartJobService.cancel(this@MainActivity, job.id); refreshJobs() }
+-                })
++                ChartJobStore.FAILED, ChartJobStore.NEEDS_RETRY, ChartJobStore.CANCELED -> actions.addView(
++                    queueActionButton("재시도", primary = true) { ChartJobService.retry(this@MainActivity, job.id); refreshJobs() }
++                )
++                else -> actions.addView(
++                    queueActionButton("취소", primary = false) { ChartJobService.cancel(this@MainActivity, job.id); refreshJobs() }
++                )
+             }
+             if (actions.childCount > 0) row.addView(actions)
+             jobQueue.addView(row)
+         }
+-        jobStore.list().firstOrNull { it.status == ChartJobStore.COMPLETED && it.songId != null }?.songId?.let { lastSongId = it }
++        allJobs.firstOrNull { it.status == ChartJobStore.COMPLETED && it.songId != null }?.songId?.let { lastSongId = it }
+         refreshSongs()
+     }
+ 
+@@ -369,14 +400,21 @@ class MainActivity : AppCompatActivity() {
+         val songs = store.list()
+         if (songs.isEmpty()) {
+             savedSongs.addView(TextView(this).apply {
+-                text = "아직 저장한 곡이 없어요."
+-                setTextColor(Color.LTGRAY)
++                text = "아직 저장한 곡이 없어요. Queue에서 곡을 만들면 여기에 표시됩니다."
++                setTextColor(Color.parseColor("#8D859A"))
++                textSize = 13f
++                setPadding(0, dp(8), 0, dp(2))
+             })
+         }
+-        for (song in songs) {
++        for ((index, song) in songs.withIndex()) {
+             val button = Button(this).apply {
+-                text = "${song.title} · ${song.difficulty}"
++                text = "${song.title}\n${song.difficulty.uppercase()}"
+                 isAllCaps = false
++                gravity = Gravity.START or Gravity.CENTER_VERTICAL
++                setTextColor(Color.WHITE)
++                textSize = 13f
++                background = getDrawable(R.drawable.bg_button_secondary)
++                setPadding(dp(14), dp(8), dp(14), dp(8))
+                 setOnClickListener { openSong(song.id) }
+                 setOnLongClickListener {
+                     AlertDialog.Builder(this@MainActivity)
+@@ -387,10 +425,57 @@ class MainActivity : AppCompatActivity() {
+                     true
+                 }
+             }
+-            savedSongs.addView(button)
++            savedSongs.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(62)).apply {
++                if (index > 0) topMargin = dp(8)
++            })
+         }
+     }
+ 
++    private fun applyResponsiveContentWidth() {
++        val displayWidth = resources.displayMetrics.widthPixels
++        val target = minOf(displayWidth - dp(24), dp(700))
++        val params = contentContainer.layoutParams as FrameLayout.LayoutParams
++        params.width = target.coerceAtLeast(dp(280))
++        params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
++        contentContainer.layoutParams = params
++    }
++
++    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
++
++    private fun roundedPanel(fill: String, stroke: String, radiusDp: Float) = GradientDrawable().apply {
++        shape = GradientDrawable.RECTANGLE
++        setColor(Color.parseColor(fill))
++        cornerRadius = radiusDp * resources.displayMetrics.density
++        setStroke(dp(1), Color.parseColor(stroke))
++    }
++
++    private fun statusBadge(status: String) = TextView(this).apply {
++        text = jobStatusLabel(status).uppercase()
++        textSize = 10f
++        setTypeface(typeface, android.graphics.Typeface.BOLD)
++        val (fill, textColor) = when (status) {
++            ChartJobStore.COMPLETED -> "#18342A" to "#7EE2B8"
++            ChartJobStore.FAILED -> "#3A1D28" to "#FF9DAF"
++            ChartJobStore.CANCELED -> "#25212B" to "#AFA7BA"
++            ChartJobStore.NEEDS_RETRY -> "#3A2D16" to "#FFD27A"
++            ChartJobStore.QUEUED -> "#211B31" to "#BCAAF8"
++            else -> "#291E40" to "#C7B1FF"
++        }
++        background = roundedPanel(fill, fill, 20f)
++        setTextColor(Color.parseColor(textColor))
++        setPadding(dp(9), dp(5), dp(9), dp(5))
++    }
++
++    private fun queueActionButton(label: String, primary: Boolean, action: () -> Unit) = Button(this).apply {
++        text = label
++        isAllCaps = false
++        textSize = 12f
++        setTextColor(Color.WHITE)
++        background = getDrawable(if (primary) R.drawable.bg_button_primary else R.drawable.bg_button_ghost)
++        setOnClickListener { action() }
++        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)).apply { marginStart = dp(6) }
++    }
++
+     private fun readSharedUrl(intent: Intent?): String? {
+         if (intent?.action != Intent.ACTION_SEND || intent.type != "text/plain") return null
+         val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+diff --git a/android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt b/android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt
+index 0953e40..40078cd 100644
+--- a/android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt
++++ b/android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt
+@@ -14,10 +14,13 @@ import android.webkit.WebChromeClient
+ import android.webkit.WebResourceRequest
+ import android.webkit.WebResourceResponse
+ import android.webkit.WebView
++import android.webkit.WebSettings
+ import android.webkit.WebViewClient
+ import androidx.activity.OnBackPressedCallback
+ import androidx.activity.result.contract.ActivityResultContracts
++import androidx.appcompat.app.AlertDialog
+ import androidx.appcompat.app.AppCompatActivity
++import android.view.View
+ import java.io.File
+ import java.io.ByteArrayInputStream
+ import java.io.FileInputStream
+@@ -31,21 +34,31 @@ class PlayActivity : AppCompatActivity() {
+     private lateinit var store: SavedSongStore
+     private lateinit var songId: String
+     private var fileCallback: ValueCallback<Array<Uri>>? = null
++    private var expectedWebVersion: String = ""
++    private var expectedBuild: Long = 0
++    private var versionRetryUsed = false
+     private val coverPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+         if (uri == null || !::webView.isInitialized) return@registerForActivityResult
+         try {
+-            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
+-            val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@registerForActivityResult
++            val mime = contentResolver.getType(uri)?.lowercase().orEmpty()
++            val allowed = setOf("image/jpeg", "image/png", "image/webp")
++            if (mime.isNotBlank() && mime !in allowed) error("지원하지 않는 이미지 형식입니다.")
++            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytesLimited(12 * 1024 * 1024) }
++                ?: error("이미지를 읽을 수 없습니다.")
++            val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("이미지를 해석할 수 없습니다.")
+             val scale = minOf(1f, 960f / maxOf(source.width, source.height).toFloat())
+             val resized = if (scale < 1f) Bitmap.createScaledBitmap(source, maxOf(1, (source.width * scale).toInt()), maxOf(1, (source.height * scale).toInt()), true) else source
+             val out = ByteArrayOutputStream()
+-            resized.compress(Bitmap.CompressFormat.JPEG, 86, out)
++            check(resized.compress(Bitmap.CompressFormat.JPEG, 86, out)) { "이미지를 저장할 수 없습니다." }
+             if (resized !== source) resized.recycle()
+             source.recycle()
+             val dataUrl = "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+             val quoted = JSONObject.quote(dataUrl)
+             webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('beatdash:native-cover',{detail:$quoted}));", null)
+-        } catch (_: Exception) { /* selection failure is non-destructive */ }
++        } catch (error: Exception) {
++            val quoted = JSONObject.quote(error.message ?: "커버 이미지를 처리할 수 없습니다.")
++            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('beatdash:native-cover-error',{detail:$quoted}));", null)
++        }
+     }
+     private inner class ArtworkBridge {
+         @JavascriptInterface fun pickCover() { runOnUiThread { coverPicker.launch("image/*") } }
+@@ -75,6 +88,8 @@ class PlayActivity : AppCompatActivity() {
+         webView.settings.javaScriptEnabled = true
+         webView.settings.domStorageEnabled = true
+         webView.settings.mediaPlaybackRequiresUserGesture = false
++        webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
++        webView.visibility = View.INVISIBLE
+         webView.settings.allowFileAccess = false
+         webView.addJavascriptInterface(ArtworkBridge(), "BeatdashArtwork")
+         webView.webChromeClient = object : WebChromeClient() {
+@@ -92,6 +107,10 @@ class PlayActivity : AppCompatActivity() {
+                 return true
+             }
+         }
++        val packageInfo = packageManager.getPackageInfo(packageName, 0)
++        expectedWebVersion = packageInfo.versionName.orEmpty()
++        expectedBuild = if (android.os.Build.VERSION.SDK_INT >= 28) packageInfo.longVersionCode else packageInfo.versionCode.toLong()
++
+         webView.webViewClient = object : WebViewClient() {
+             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                 if (!request.isForMainFrame || request.url.host == Uri.parse(RhythmApi.WEB_BASE).host) return false
+@@ -99,6 +118,35 @@ class PlayActivity : AppCompatActivity() {
+                 return true
+             }
+ 
++            override fun onPageFinished(view: WebView, url: String) {
++                super.onPageFinished(view, url)
++                val uri = Uri.parse(url)
++                if (uri.host != Uri.parse(RhythmApi.WEB_BASE).host) return
++                view.evaluateJavascript("String(window.__BEATDASH_VERSION__ || '')") { raw ->
++                    val actual = raw.orEmpty().trim().removeSurrounding("\"")
++                    if (actual == expectedWebVersion) {
++                        versionRetryUsed = false
++                        view.visibility = View.VISIBLE
++                        return@evaluateJavascript
++                    }
++                    if (!versionRetryUsed) {
++                        versionRetryUsed = true
++                        view.clearCache(true)
++                        val refreshed = uri.buildUpon().appendQueryParameter("webRefresh", expectedBuild.toString()).build().toString()
++                        view.loadUrl(refreshed)
++                        return@evaluateJavascript
++                    }
++                    view.stopLoading()
++                    view.visibility = View.INVISIBLE
++                    AlertDialog.Builder(this@PlayActivity)
++                        .setTitle("앱 화면 업데이트 필요")
++                        .setMessage("APK는 ${expectedWebVersion}인데 Web 화면은 ${actual.ifBlank { "확인 불가" }}입니다. 오래된 화면으로 플레이하지 않도록 실행을 중단했습니다. Web 배포 후 다시 열어 주세요.")
++                        .setCancelable(false)
++                        .setPositiveButton("닫기") { _, _ -> finish() }
++                        .show()
++                }
++            }
++
+             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                 val url = request.url
+                 if (url.scheme != "https" || url.host != Uri.parse(RhythmApi.WEB_BASE).host || request.method !in setOf("GET", "HEAD")) return null
+@@ -117,14 +165,24 @@ class PlayActivity : AppCompatActivity() {
+         }
+ 
+         val url = if (song != null) "${RhythmApi.WEB_BASE}/?session=${Uri.encode(song.id)}&saved=1" else "${RhythmApi.WEB_BASE}/?view=$entryView"
+-        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+-        val build = if (android.os.Build.VERSION.SDK_INT >= 28) packageInfo.longVersionCode else packageInfo.versionCode.toLong()
+-        webView.loadUrl("$url&nativeVersion=${Uri.encode(packageInfo.versionName.orEmpty())}&nativeBuild=$build")
++        webView.loadUrl("$url&nativeVersion=${Uri.encode(expectedWebVersion)}&nativeBuild=$expectedBuild&webRefresh=$expectedBuild")
+         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+             override fun handleOnBackPressed() { finish() }
+         })
+     }
+ 
++    private fun InputStream.readBytesLimited(limit: Int): ByteArray {
++        val output = ByteArrayOutputStream()
++        val buffer = ByteArray(8192)
++        while (true) {
++            val count = read(buffer)
++            if (count < 0) break
++            check(output.size() + count <= limit) { "이미지 파일이 너무 큽니다." }
++            output.write(buffer, 0, count)
++        }
++        return output.toByteArray()
++    }
++
+     private fun fileResponse(file: File, mime: String, request: WebResourceRequest): WebResourceResponse {
+         if (!file.isFile) return WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), "Not Found".byteInputStream())
+         val size = file.length()
+@@ -172,7 +230,10 @@ class PlayActivity : AppCompatActivity() {
+ 
+     override fun onResume() {
+         super.onResume()
+-        if (::webView.isInitialized) webView.onResume()
++        if (::webView.isInitialized) {
++            webView.onResume()
++            webView.evaluateJavascript("window.dispatchEvent(new Event('beatdash:resume'));", null)
++        }
+     }
+ 
+     override fun onDestroy() {
+diff --git a/android/app/src/main/res/drawable/bg_button_ghost.xml b/android/app/src/main/res/drawable/bg_button_ghost.xml
+new file mode 100644
+index 0000000..4d9a5dc
+--- /dev/null
++++ b/android/app/src/main/res/drawable/bg_button_ghost.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true"><shape android:shape="rectangle"><solid android:color="#241C33"/><corners android:radius="12dp"/></shape></item>
++    <item><shape android:shape="rectangle"><solid android:color="#17131E"/><corners android:radius="12dp"/></shape></item>
++</selector>
+diff --git a/android/app/src/main/res/drawable/bg_button_primary.xml b/android/app/src/main/res/drawable/bg_button_primary.xml
+new file mode 100644
+index 0000000..bac2cd0
+--- /dev/null
++++ b/android/app/src/main/res/drawable/bg_button_primary.xml
+@@ -0,0 +1,9 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_enabled="false">
++        <shape android:shape="rectangle"><solid android:color="#3A3150"/><corners android:radius="14dp"/></shape>
++    </item>
++    <item>
++        <shape android:shape="rectangle"><solid android:color="#7C5CE5"/><corners android:radius="14dp"/></shape>
++    </item>
++</selector>
+diff --git a/android/app/src/main/res/drawable/bg_button_secondary.xml b/android/app/src/main/res/drawable/bg_button_secondary.xml
+new file mode 100644
+index 0000000..708a835
+--- /dev/null
++++ b/android/app/src/main/res/drawable/bg_button_secondary.xml
+@@ -0,0 +1,9 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true">
++        <shape android:shape="rectangle"><solid android:color="#292234"/><stroke android:width="1dp" android:color="#59496F"/><corners android:radius="14dp"/></shape>
++    </item>
++    <item>
++        <shape android:shape="rectangle"><solid android:color="#1B1723"/><stroke android:width="1dp" android:color="#3C324B"/><corners android:radius="14dp"/></shape>
++    </item>
++</selector>
+diff --git a/android/app/src/main/res/drawable/bg_card.xml b/android/app/src/main/res/drawable/bg_card.xml
+new file mode 100644
+index 0000000..b79088d
+--- /dev/null
++++ b/android/app/src/main/res/drawable/bg_card.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
++    <solid android:color="#15121D" />
++    <stroke android:width="1dp" android:color="#30283E" />
++    <corners android:radius="22dp" />
++</shape>
+diff --git a/android/app/src/main/res/drawable/bg_card_soft.xml b/android/app/src/main/res/drawable/bg_card_soft.xml
+new file mode 100644
+index 0000000..cd87067
+--- /dev/null
++++ b/android/app/src/main/res/drawable/bg_card_soft.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
++    <solid android:color="#100E16" />
++    <stroke android:width="1dp" android:color="#241E30" />
++    <corners android:radius="18dp" />
++</shape>
+diff --git a/android/app/src/main/res/drawable/bg_input.xml b/android/app/src/main/res/drawable/bg_input.xml
+new file mode 100644
+index 0000000..5119ef9
+--- /dev/null
++++ b/android/app/src/main/res/drawable/bg_input.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
++    <solid android:color="#0D0B12" />
++    <stroke android:width="1dp" android:color="#433754" />
++    <corners android:radius="14dp" />
++    <padding android:left="14dp" android:top="10dp" android:right="14dp" android:bottom="10dp" />
++</shape>
+diff --git a/android/app/src/main/res/layout/activity_main.xml b/android/app/src/main/res/layout/activity_main.xml
+index a69f65b..a96ad2a 100644
+--- a/android/app/src/main/res/layout/activity_main.xml
++++ b/android/app/src/main/res/layout/activity_main.xml
+@@ -3,202 +3,406 @@
+     android:layout_width="match_parent"
+     android:layout_height="match_parent"
+     android:background="#08070D"
+-    android:fillViewport="true">
++    android:clipToPadding="false"
++    android:fillViewport="true"
++    android:paddingBottom="24dp">
+ 
+-    <LinearLayout
++    <FrameLayout
+         android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:orientation="vertical"
+-        android:padding="24dp">
++        android:layout_height="wrap_content">
+ 
+-        <TextView
+-            android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
+-            android:text="BEATDASH"
+-            android:textColor="#A78BFA"
+-            android:textSize="13sp"
+-            android:textStyle="bold" />
+-
+-        <TextView
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="8dp"
+-            android:text="YouTube 링크로\n채보 만들고 플레이"
+-            android:textColor="#FFFFFF"
+-            android:textSize="30sp"
+-            android:textStyle="bold" />
+-
+-        <TextView
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="10dp"
+-            android:text="링크 입력 → 영상 확인 → 채보 만들기 → 플레이\n생성된 곡은 기기에 저장됩니다."
+-            android:textColor="#A7A3B3"
+-            android:textSize="14sp" />
+-
+-        <EditText
+-            android:id="@+id/urlInput"
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="26dp"
+-            android:backgroundTint="#7C5CE5"
+-            android:hint="https://youtu.be/..."
+-            android:inputType="textUri"
+-            android:minHeight="52dp"
+-            android:imeOptions="actionGo"
+-            android:singleLine="true"
+-            android:textColor="#FFFFFF"
+-            android:textColorHint="#716B7D" />
+-
+-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+-            <Button android:id="@+id/pasteButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:text="붙여넣기" />
+-            <Button android:id="@+id/previewButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:text="URL 불러오기" />
+-        </LinearLayout>
+-        <LinearLayout android:id="@+id/previewCard" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone" android:layout_marginTop="16dp">
+-            <ImageView android:id="@+id/previewImage" android:layout_width="match_parent" android:layout_height="180dp" android:scaleType="fitCenter" android:contentDescription="원본 영상 썸네일" />
+-            <TextView android:id="@+id/previewTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="20sp" android:textColor="#FFFFFF" android:textStyle="bold" />
+-            <TextView android:id="@+id/previewMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="14sp" android:textColor="#C4BFCE" />
+-        </LinearLayout>
+-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+-            <Button android:id="@+id/libraryButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:text="Library 열기" />
+-            <Button android:id="@+id/settingsButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:text="설정" />
+-        </LinearLayout>
+-
+-        <TextView
+-            android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="20dp"
+-            android:text="난이도"
+-            android:textColor="#C4BFCE"
+-            android:textStyle="bold" />
+-
+-        <Spinner
+-            android:id="@+id/difficultySpinner"
+-            android:layout_width="match_parent"
+-            android:layout_height="48dp"
+-            android:layout_marginTop="6dp"
+-            android:backgroundTint="#8B5CF6" />
+-
+-        <TextView
+-            android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="18dp"
+-            android:text="Pattern seed"
+-            android:textColor="#C4BFCE"
+-            android:textStyle="bold" />
+-
+-        <EditText
+-            android:id="@+id/seedInput"
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:inputType="numberSigned"
+-            android:text="42"
+-            android:textColor="#FFFFFF" />
+-
+-        <Button
+-            android:id="@+id/startButton"
+-            android:layout_width="match_parent"
+-            android:layout_height="56dp"
+-            android:layout_marginTop="26dp"
+-            android:text="현재 링크 대기열에 추가"
+-            android:textAllCaps="false"
+-            android:textStyle="bold" />
+-
+-        <TextView
++        <LinearLayout
++            android:id="@+id/contentContainer"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:layout_marginTop="22dp"
+-            android:text="여러 링크 한 번에 추가"
+-            android:textColor="#FFFFFF"
+-            android:textSize="17sp"
+-            android:textStyle="bold" />
++            android:layout_gravity="top|center_horizontal"
++            android:orientation="vertical"
++            android:paddingStart="18dp"
++            android:paddingTop="26dp"
++            android:paddingEnd="18dp"
++            android:paddingBottom="34dp">
+ 
+-        <EditText
+-            android:id="@+id/batchUrlInput"
+-            android:layout_width="match_parent"
+-            android:layout_height="120dp"
+-            android:layout_marginTop="8dp"
+-            android:gravity="top|start"
+-            android:hint="YouTube 링크를 줄바꿈으로 붙여넣기"
+-            android:inputType="textMultiLine|textUri"
+-            android:padding="10dp"
+-            android:textColor="#FFFFFF"
+-            android:textColorHint="#716B7D" />
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:gravity="center_vertical"
++                android:orientation="horizontal">
++                <TextView
++                    android:layout_width="0dp"
++                    android:layout_height="wrap_content"
++                    android:layout_weight="1"
++                    android:letterSpacing="0.12"
++                    android:text="BEATDASH"
++                    android:textColor="#A78BFA"
++                    android:textSize="14sp"
++                    android:textStyle="bold" />
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:background="@drawable/bg_button_ghost"
++                    android:paddingStart="11dp"
++                    android:paddingTop="6dp"
++                    android:paddingEnd="11dp"
++                    android:paddingBottom="6dp"
++                    android:text="COMPANION"
++                    android:textColor="#B9AEC8"
++                    android:textSize="10sp"
++                    android:textStyle="bold" />
++            </LinearLayout>
+ 
+-        <Button
+-            android:id="@+id/batchAddButton"
+-            android:layout_width="match_parent"
+-            android:layout_height="52dp"
+-            android:text="링크 모두 대기열에 추가"
+-            android:textAllCaps="false" />
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="10dp"
++                android:text="링크 하나로\n바로 플레이"
++                android:textColor="#FFFFFF"
++                android:textSize="32sp"
++                android:textStyle="bold" />
+ 
+-        <TextView
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="20dp"
+-            android:text="채보 생성 대기열"
+-            android:textColor="#FFFFFF"
+-            android:textSize="19sp"
+-            android:textStyle="bold" />
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="8dp"
++                android:text="YouTube 영상을 확인하고 채보 생성 대기열에 추가하세요. 완료된 곡은 Library에 자동 저장됩니다."
++                android:textColor="#A7A3B3"
++                android:textSize="14sp" />
+ 
+-        <LinearLayout
+-            android:id="@+id/jobQueue"
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="8dp"
+-            android:orientation="vertical" />
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="24dp"
++                android:background="@drawable/bg_card"
++                android:orientation="vertical"
++                android:padding="18dp">
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:text="YOUTUBE LINK"
++                    android:textColor="#9B8AAC"
++                    android:textSize="11sp"
++                    android:textStyle="bold" />
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="4dp"
++                    android:text="영상 불러오기"
++                    android:textColor="#FFFFFF"
++                    android:textSize="20sp"
++                    android:textStyle="bold" />
++                <EditText
++                    android:id="@+id/urlInput"
++                    android:layout_width="match_parent"
++                    android:layout_height="56dp"
++                    android:layout_marginTop="14dp"
++                    android:background="@drawable/bg_input"
++                    android:hint="https://youtu.be/..."
++                    android:imeOptions="actionGo"
++                    android:inputType="textUri"
++                    android:singleLine="true"
++                    android:textColor="#FFFFFF"
++                    android:textColorHint="#6F687B"
++                    android:textSize="14sp" />
++                <LinearLayout
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="10dp"
++                    android:orientation="horizontal">
++                    <Button
++                        android:id="@+id/pasteButton"
++                        android:layout_width="0dp"
++                        android:layout_height="50dp"
++                        android:layout_marginEnd="5dp"
++                        android:layout_weight="1"
++                        android:background="@drawable/bg_button_secondary"
++                        android:text="붙여넣기"
++                        android:textAllCaps="false"
++                        android:textColor="#EEE9F5" />
++                    <Button
++                        android:id="@+id/previewButton"
++                        android:layout_width="0dp"
++                        android:layout_height="50dp"
++                        android:layout_marginStart="5dp"
++                        android:layout_weight="1"
++                        android:background="@drawable/bg_button_primary"
++                        android:text="URL 확인"
++                        android:textAllCaps="false"
++                        android:textColor="#FFFFFF"
++                        android:textStyle="bold" />
++                </LinearLayout>
++                <LinearLayout
++                    android:id="@+id/previewCard"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="14dp"
++                    android:background="@drawable/bg_card_soft"
++                    android:orientation="vertical"
++                    android:padding="12dp"
++                    android:visibility="gone">
++                    <ImageView
++                        android:id="@+id/previewImage"
++                        android:layout_width="match_parent"
++                        android:layout_height="190dp"
++                        android:adjustViewBounds="true"
++                        android:background="#09070C"
++                        android:contentDescription="원본 영상 썸네일"
++                        android:scaleType="centerCrop" />
++                    <TextView
++                        android:id="@+id/previewTitle"
++                        android:layout_width="match_parent"
++                        android:layout_height="wrap_content"
++                        android:layout_marginTop="12dp"
++                        android:ellipsize="end"
++                        android:maxLines="2"
++                        android:textColor="#FFFFFF"
++                        android:textSize="17sp"
++                        android:textStyle="bold" />
++                    <TextView
++                        android:id="@+id/previewMeta"
++                        android:layout_width="match_parent"
++                        android:layout_height="wrap_content"
++                        android:layout_marginTop="5dp"
++                        android:textColor="#AFA7BA"
++                        android:textSize="13sp" />
++                </LinearLayout>
++            </LinearLayout>
+ 
+-        <ProgressBar
+-            android:id="@+id/progressBar"
+-            style="?android:attr/progressBarStyleHorizontal"
+-            android:layout_width="match_parent"
+-            android:layout_height="10dp"
+-            android:layout_marginTop="22dp"
+-            android:max="100"
+-            android:indeterminate="true"
+-            android:visibility="gone" />
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="12dp"
++                android:orientation="horizontal">
++                <Button
++                    android:id="@+id/libraryButton"
++                    android:layout_width="0dp"
++                    android:layout_height="54dp"
++                    android:layout_marginEnd="6dp"
++                    android:layout_weight="1"
++                    android:background="@drawable/bg_button_secondary"
++                    android:text="LIBRARY"
++                    android:textAllCaps="false"
++                    android:textColor="#FFFFFF"
++                    android:textStyle="bold" />
++                <Button
++                    android:id="@+id/settingsButton"
++                    android:layout_width="0dp"
++                    android:layout_height="54dp"
++                    android:layout_marginStart="6dp"
++                    android:layout_weight="1"
++                    android:background="@drawable/bg_button_secondary"
++                    android:text="SETTINGS"
++                    android:textAllCaps="false"
++                    android:textColor="#FFFFFF"
++                    android:textStyle="bold" />
++            </LinearLayout>
+ 
+-        <TextView
+-            android:id="@+id/statusText"
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="12dp"
+-            android:text="대기 중"
+-            android:textColor="#C4BFCE"
+-            android:textSize="14sp" />
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="12dp"
++                android:background="@drawable/bg_card"
++                android:orientation="vertical"
++                android:padding="18dp">
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:text="CHART OPTIONS"
++                    android:textColor="#9B8AAC"
++                    android:textSize="11sp"
++                    android:textStyle="bold" />
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="4dp"
++                    android:text="채보 옵션"
++                    android:textColor="#FFFFFF"
++                    android:textSize="20sp"
++                    android:textStyle="bold" />
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="14dp"
++                    android:text="난이도"
++                    android:textColor="#CFC6D8"
++                    android:textSize="12sp"
++                    android:textStyle="bold" />
++                <Spinner
++                    android:id="@+id/difficultySpinner"
++                    android:layout_width="match_parent"
++                    android:layout_height="50dp"
++                    android:layout_marginTop="5dp"
++                    android:background="@drawable/bg_input"
++                    android:paddingStart="10dp"
++                    android:paddingEnd="10dp" />
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="13dp"
++                    android:text="Pattern Seed"
++                    android:textColor="#CFC6D8"
++                    android:textSize="12sp"
++                    android:textStyle="bold" />
++                <EditText
++                    android:id="@+id/seedInput"
++                    android:layout_width="match_parent"
++                    android:layout_height="50dp"
++                    android:layout_marginTop="5dp"
++                    android:background="@drawable/bg_input"
++                    android:inputType="numberSigned"
++                    android:singleLine="true"
++                    android:text="42"
++                    android:textColor="#FFFFFF" />
++                <Button
++                    android:id="@+id/startButton"
++                    android:layout_width="match_parent"
++                    android:layout_height="56dp"
++                    android:layout_marginTop="16dp"
++                    android:background="@drawable/bg_button_primary"
++                    android:text="현재 링크를 Queue에 추가"
++                    android:textAllCaps="false"
++                    android:textColor="#FFFFFF"
++                    android:textStyle="bold" />
++            </LinearLayout>
+ 
+-        <Button
+-            android:id="@+id/openWebButton"
+-            android:layout_width="match_parent"
+-            android:layout_height="52dp"
+-            android:layout_marginTop="16dp"
+-            android:text="앱에서 플레이"
+-            android:textAllCaps="false"
+-            android:visibility="gone" />
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="12dp"
++                android:background="@drawable/bg_card"
++                android:orientation="vertical"
++                android:padding="18dp">
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:text="BATCH ADD"
++                    android:textColor="#9B8AAC"
++                    android:textSize="11sp"
++                    android:textStyle="bold" />
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="4dp"
++                    android:text="여러 링크 한 번에 추가"
++                    android:textColor="#FFFFFF"
++                    android:textSize="19sp"
++                    android:textStyle="bold" />
++                <EditText
++                    android:id="@+id/batchUrlInput"
++                    android:layout_width="match_parent"
++                    android:layout_height="126dp"
++                    android:layout_marginTop="12dp"
++                    android:background="@drawable/bg_input"
++                    android:gravity="top|start"
++                    android:hint="YouTube 링크를 줄바꿈으로 붙여넣기"
++                    android:inputType="textMultiLine|textUri"
++                    android:textColor="#FFFFFF"
++                    android:textColorHint="#6F687B" />
++                <Button
++                    android:id="@+id/batchAddButton"
++                    android:layout_width="match_parent"
++                    android:layout_height="52dp"
++                    android:layout_marginTop="10dp"
++                    android:background="@drawable/bg_button_secondary"
++                    android:text="모두 Queue에 추가"
++                    android:textAllCaps="false"
++                    android:textColor="#FFFFFF"
++                    android:textStyle="bold" />
++            </LinearLayout>
+ 
+-        <TextView
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="28dp"
+-            android:text="저장한 곡"
+-            android:textColor="#FFFFFF"
+-            android:textSize="21sp"
+-            android:textStyle="bold" />
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="12dp"
++                android:background="@drawable/bg_card"
++                android:orientation="vertical"
++                android:padding="18dp">
++                <LinearLayout
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:gravity="center_vertical"
++                    android:orientation="horizontal">
++                    <LinearLayout
++                        android:layout_width="0dp"
++                        android:layout_height="wrap_content"
++                        android:layout_weight="1"
++                        android:orientation="vertical">
++                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="QUEUE" android:textColor="#9B8AAC" android:textSize="11sp" android:textStyle="bold" />
++                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="채보 생성 대기열" android:textColor="#FFFFFF" android:textSize="20sp" android:textStyle="bold" />
++                    </LinearLayout>
++                    <TextView
++                        android:id="@+id/queueSummary"
++                        android:layout_width="wrap_content"
++                        android:layout_height="wrap_content"
++                        android:background="@drawable/bg_button_ghost"
++                        android:paddingStart="10dp"
++                        android:paddingTop="6dp"
++                        android:paddingEnd="10dp"
++                        android:paddingBottom="6dp"
++                        android:text="0 jobs"
++                        android:textColor="#BDAAF3"
++                        android:textSize="11sp"
++                        android:textStyle="bold" />
++                </LinearLayout>
++                <LinearLayout
++                    android:id="@+id/jobQueue"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="12dp"
++                    android:orientation="vertical" />
++                <ProgressBar
++                    android:id="@+id/progressBar"
++                    style="?android:attr/progressBarStyleHorizontal"
++                    android:layout_width="match_parent"
++                    android:layout_height="8dp"
++                    android:layout_marginTop="14dp"
++                    android:indeterminate="true"
++                    android:indeterminateTint="#8B5CF6"
++                    android:max="100"
++                    android:visibility="gone" />
++                <TextView
++                    android:id="@+id/statusText"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="10dp"
++                    android:text="대기 중"
++                    android:textColor="#AFA7BA"
++                    android:textSize="13sp" />
++                <Button
++                    android:id="@+id/openWebButton"
++                    android:layout_width="match_parent"
++                    android:layout_height="50dp"
++                    android:layout_marginTop="12dp"
++                    android:background="@drawable/bg_button_primary"
++                    android:text="완료한 곡 플레이"
++                    android:textAllCaps="false"
++                    android:textColor="#FFFFFF"
++                    android:visibility="gone" />
++            </LinearLayout>
+ 
+-        <LinearLayout
+-            android:id="@+id/savedSongs"
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="10dp"
+-            android:orientation="vertical" />
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="12dp"
++                android:background="@drawable/bg_card"
++                android:orientation="vertical"
++                android:padding="18dp">
++                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="RECENT" android:textColor="#9B8AAC" android:textSize="11sp" android:textStyle="bold" />
++                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="저장한 곡" android:textColor="#FFFFFF" android:textSize="20sp" android:textStyle="bold" />
++                <LinearLayout
++                    android:id="@+id/savedSongs"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="10dp"
++                    android:orientation="vertical" />
++            </LinearLayout>
+ 
+-        <TextView
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_marginTop="26dp"
+-            android:text="MVP 제한: 공개 YouTube 영상만 대상으로 하며, 연령 제한·지역 제한·DRM 영상은 실패할 수 있습니다."
+-            android:textColor="#696473"
+-            android:textSize="12sp" />
+-
+-    </LinearLayout>
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="18dp"
++                android:gravity="center"
++                android:text="공개 YouTube 영상 기준 · 연령/지역/DRM 제한 영상은 처리되지 않을 수 있습니다."
++                android:textColor="#625C6D"
++                android:textSize="11sp" />
++        </LinearLayout>
++    </FrameLayout>
+ </ScrollView>
+diff --git a/android/app/src/main/res/layout/spinner_dropdown_item.xml b/android/app/src/main/res/layout/spinner_dropdown_item.xml
+new file mode 100644
+index 0000000..52b9b56
+--- /dev/null
++++ b/android/app/src/main/res/layout/spinner_dropdown_item.xml
+@@ -0,0 +1,11 @@
++<?xml version="1.0" encoding="utf-8"?>
++<TextView xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:background="#17131F"
++    android:gravity="center_vertical"
++    android:minHeight="48dp"
++    android:paddingStart="16dp"
++    android:paddingEnd="16dp"
++    android:textColor="#FFFFFF"
++    android:textSize="14sp" />
+diff --git a/android/app/src/main/res/layout/spinner_item.xml b/android/app/src/main/res/layout/spinner_item.xml
+new file mode 100644
+index 0000000..02de2b3
+--- /dev/null
++++ b/android/app/src/main/res/layout/spinner_item.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<TextView xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:gravity="center_vertical"
++    android:minHeight="48dp"
++    android:paddingStart="12dp"
++    android:paddingEnd="12dp"
++    android:textColor="#FFFFFF"
++    android:textSize="14sp" />
+diff --git a/docs/V4_8_ANDROID_DEVICE_CHECKLIST.md b/docs/V4_8_ANDROID_DEVICE_CHECKLIST.md
+new file mode 100644
+index 0000000..d83c22b
+--- /dev/null
++++ b/docs/V4_8_ANDROID_DEVICE_CHECKLIST.md
+@@ -0,0 +1,90 @@
++# BEATDASH v4.8 Android device checklist
++
++Build target: `4.8.0-rc.1`
++Expected result before promotion: every required item below passes on the signed APK installed as an update over the existing app.
++
++## A. Update/data protection
++- [ ] Install the new APK over v4.75 without uninstalling.
++- [ ] Existing Library songs remain.
++- [ ] Existing charts and PB/records remain.
++- [ ] displayTitle/originalTitle remain.
++- [ ] originalThumbnail/customCover remain.
++- [ ] Note Speed remains.
++- [ ] Global and per-song Timing Offset remain.
++- [ ] Settings remain.
++- [ ] Queue state remains/restores correctly.
++
++## B. Native home UI
++- [ ] Phone portrait: cards, inputs and buttons are readable and not clipped.
++- [ ] Tablet landscape: content remains centered and does not stretch excessively.
++- [ ] Link -> URL check -> preview -> Queue add flow is visually obvious.
++- [ ] Library and Settings shortcuts work.
++- [ ] Difficulty/Pattern Seed controls work.
++- [ ] Batch input works.
++- [ ] Queue cards show status/message and correct play/retry/cancel action.
++
++## C. START/countdown
++- [ ] PLAY never exposes an extra START button.
++- [ ] Media preparation happens before countdown.
++- [ ] 3 -> 2 -> 1 -> playback starts automatically.
++- [ ] No note clock/Miss occurs during prepare/countdown.
++- [ ] Restart follows prepare -> countdown -> play.
++- [ ] Initial playback error -> retry returns through prepare/countdown.
++- [ ] Background app during countdown; wait >5s; no delayed auto-start occurs.
++- [ ] Foreground app; a fresh countdown starts.
++- [ ] Screen off/on during countdown behaves the same.
++
++## D. Multi-touch/judgement
++- [ ] Tap + Tap.
++- [ ] Tap + Hold.
++- [ ] Hold + Hold.
++- [ ] Hold maintained while tapping another lane.
++- [ ] Hold maintained while flicking another lane.
++- [ ] FAST/SLOW labels still match timing direction.
++- [ ] Great/Good/Miss reset Perfect Streak correctly.
++- [ ] Hold release/regrab regression absent.
++- [ ] Flick remains visually distinct.
++- [ ] Note Speed changes visuals only, not judgement timing.
++
++## E. Phase 3 access paths
++- [ ] Original YouTube thumbnail remains after app restart.
++- [ ] Custom Cover button opens Android native picker.
++- [ ] JPEG/JPG, PNG and WebP input accepted.
++- [ ] Large image is resized/compressed without crash.
++- [ ] Custom Cover remains after app restart.
++- [ ] Restore Original removes only custom cover and restores original thumbnail.
++- [ ] Settings -> Feedback is reachable.
++- [ ] Feedback shows category/text/version/build/platform/screen and optional song context.
++
++## F. Queue/background regression
++- [ ] Single URL add.
++- [ ] Multiple URL add.
++- [ ] Add another URL while one is processing.
++- [ ] queued/running/completed/failed/canceled/needs_retry display correctly.
++- [ ] retry.
++- [ ] cancel.
++- [ ] duplicate prevention.
++- [ ] Activity recreation restores queue UI/state.
++- [ ] Foreground service notification visible while processing.
++- [ ] Background processing continues.
++- [ ] Screen-off processing continues as designed.
++- [ ] Completed job does not force-open gameplay.
++
++## G. Version/deployment gate
++- [ ] Deploy Web/Railway `4.8.0-rc.1` before distributing the APK.
++- [ ] APK opens Web gameplay/library/settings when Web version matches.
++- [ ] Deliberate Web/APK mismatch is blocked instead of displaying stale UI.
++- [ ] `/api/health` reports expected version/revision after deployment.
++
++## H. Chart AI v2 sanity playtest
++Use at least three representative real songs: strong beat, dense fast onset, repeated phrase.
++- [ ] Easy is sparse/playable.
++- [ ] Normal meaningfully differs where source material permits.
++- [ ] Hard is denser but controlled.
++- [ ] Expert is demanding without impossible/unpleasant clusters.
++- [ ] Important beats/onsets are represented.
++- [ ] Weak off-grid filler is not excessive.
++- [ ] Phrase repetition feels intentional rather than random.
++- [ ] Hold/Flick placement feels natural.
++
++If all required device/CI checks pass, change `web/VERSION` from `4.8.0-rc.1` to `4.8.0`, rebuild Web/backend/APK from the same source, and rerun the version/deployment gates.
+diff --git a/docs/V4_8_CHANGED_FILES.txt b/docs/V4_8_CHANGED_FILES.txt
+new file mode 100644
+index 0000000..971854f
+--- /dev/null
++++ b/docs/V4_8_CHANGED_FILES.txt
+@@ -0,0 +1,49 @@
++Baseline: BEATDASH-v4.75-RC-integrated-phase3-source.zip
++Target: BEATDASH v4.8.0-rc.1
++
++MODIFY .github/workflows/build-android.yml
++  - Trigger Android build on web/VERSION changes and verify APK versionName matches the SSoT.
++MODIFY android/app/src/main/java/com/rhythmlab/companion/MainActivity.kt
++  - Native home visual hierarchy, responsive width, queue cards/status badges, saved-song presentation.
++MODIFY android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt
++  - Stale production-Web version gate, no-cache loading, lifecycle resume event, native cover error path.
++ADD android/app/src/main/res/drawable/bg_button_ghost.xml
++ADD android/app/src/main/res/drawable/bg_button_primary.xml
++ADD android/app/src/main/res/drawable/bg_button_secondary.xml
++ADD android/app/src/main/res/drawable/bg_card.xml
++ADD android/app/src/main/res/drawable/bg_card_soft.xml
++ADD android/app/src/main/res/drawable/bg_input.xml
++  - Native dark/purple card/input/button resources.
++MODIFY android/app/src/main/res/layout/activity_main.xml
++  - Card-based responsive Android home layout.
++ADD android/app/src/main/res/layout/spinner_dropdown_item.xml
++ADD android/app/src/main/res/layout/spinner_item.xml
++  - Spinner presentation matching the redesigned home.
++MODIFY scripts/tests/test_version_source.py
++  - SSoT/version gate and Android workflow checks.
++ADD scripts/tests/test_v48_android_source.py
++  - Android UI/queue/version/artwork/data/feedback source regressions.
++ADD scripts/tests/test_v48_start_flow_source.py
++  - START removal, preparation/countdown/lifecycle/note-speed source contracts.
++MODIFY web/BUILD_REVISION
++  - RC local build marker.
++MODIFY web/VERSION
++  - 4.8.0-rc.1 release source.
++ADD web/analyzer/tests/test_v48_chart_ai_pipeline.py
++  - Representative Chart AI v2 pipeline/seed/density/schema regression fixtures.
++MODIFY web/src/App.tsx
++  - Remove obsolete requireStartGesture caller contract.
++MODIFY web/src/__tests__/gameState.test.ts
++  - Multi-lane/multi-touch and Perfect Streak regression coverage.
++MODIFY web/src/__tests__/mediaLifecycle.test.tsx
++  - Media-ready countdown, no START action, no early Miss, background race coverage.
++MODIFY web/src/components/GameScreen.tsx
++  - Explicit preparing/countdown/playing startup state machine and lifecycle/error race hardening.
++MODIFY web/src/components/v4/SongDetailScreen.tsx
++  - Surface native artwork-picker processing errors in the actual UI.
++MODIFY web/src/main.tsx
++  - Expose Web release version to Android stale-version gate from web/VERSION.
++ADD docs/V4_8_IMPLEMENTATION_REPORT.md
++ADD docs/V4_8_TEST_REPORT.md
++ADD docs/V4_8_ANDROID_DEVICE_CHECKLIST.md
++ADD docs/V4_8_CHANGED_FILES.txt
+diff --git a/docs/V4_8_IMPLEMENTATION_REPORT.md b/docs/V4_8_IMPLEMENTATION_REPORT.md
+new file mode 100644
+index 0000000..4c2a08d
+--- /dev/null
++++ b/docs/V4_8_IMPLEMENTATION_REPORT.md
+@@ -0,0 +1,101 @@
++# BEATDASH::Revive v4.8 implementation report
++
++Status: **v4.8 RC — HOLD FOR DEVICE VERIFICATION**
++
++Version source: `web/VERSION = 4.8.0-rc.1`
++Baseline used in this work: archived `BEATDASH-v4.75-RC-integrated-phase3-source.zip` (Phase 2 + Phase 3 integrated snapshot).
++
++> GitHub main was intentionally not accessed. The user will apply the patch manually. Because GitHub main can contain later manual changes, run `git apply --check` before applying the patch.
++
++## 1. Implemented
++
++### Android home UI redesign
++- Reworked the native `MainActivity` home into a card-based hierarchy while keeping the existing queue engine and persistence intact.
++- Added a centered responsive content container with a ~700dp maximum width for large tablets.
++- Separated link preview, quick navigation, chart options, batch add, queue, and saved songs into visually distinct sections.
++- Added custom purple/dark card, input, primary, secondary and ghost drawable resources plus spinner rows.
++- Queue entries now render as individual cards with title, difficulty/seed, status badge, message and context-appropriate play/retry/cancel actions.
++- Queue processing/storage/service code was not rewritten.
++
++### START / countdown execution-path repair
++The v4.75 integrated source did not contain a visible gameplay `START` button, but Android `PlayActivity` loaded the production Railway Web UI without enforcing that its release matched the installed APK. A stale/deferred Web deployment could therefore show an older gameplay UI even with a newer APK.
++
++v4.8 fixes both sides of that failure mode:
++- Removed the obsolete `requireStartGesture` prop/contract from `GameScreen` and its callers.
++- Added explicit startup phases: `preparing -> countdown -> playing`.
++- Countdown does not begin until media reports it is prepared.
++- The judgement/game loop stays disabled until actual media playback starts.
++- Background/visibility/pause invalidates the pending countdown generation and blocks delayed callbacks.
++- Explicit foreground/resume restarts from the preparation gate rather than letting an old callback auto-start.
++- Restart/Retry returns to the same preparation/countdown path.
++- Initial media-play errors no longer silently re-enter countdown or bypass it on retry.
++- Android dispatches explicit `beatdash:pause` / `beatdash:resume` lifecycle events.
++
++### Android/Web stale-version gate
++- `web/src/main.tsx` exposes `window.__BEATDASH_VERSION__` from the existing `web/VERSION` single source.
++- `PlayActivity` reads the installed APK `versionName`, loads the remote Web UI with no-cache behavior and keeps the WebView hidden until the Web release reports the same version.
++- On first mismatch it clears WebView cache and retries once with a build cache-buster.
++- On persistent mismatch it refuses to expose the stale gameplay UI and shows an update/deployment error instead.
++- This specifically prevents an old production Web bundle from reintroducing removed UI such as the reported START screen.
++
++### Judgement / multi-input verification support
++- Added regression coverage for Tap+Tap, Tap+Hold, Hold+Hold, Hold-held + Tap and Hold-held + Flick behavior.
++- Added Perfect Streak reset assertions.
++- Existing FAST/SLOW sign behavior, timing offset path and visual-only note speed contract remain unchanged.
++- No v5 input/chart-variant changes were introduced.
++
++### Phase 3 access-path checks
++- Feedback remains reachable from Settings through the actual `App` navigation path.
++- Native artwork picker remains connected through `BeatdashArtwork`.
++- Added native-cover error propagation back to Song Detail so invalid/failed native images do not fail silently.
++- Accepted native image MIME types remain JPEG/JPG, PNG and WebP; Android decodes, bounds input, resizes and normalizes persistent output to JPEG.
++- Original thumbnail/custom-cover DB schema and fallback priority are unchanged; no destructive migration was introduced.
++
++### Chart AI v2 verification
++- Confirmed `chart_ai_v2.refine_selected_events` is called by the real analyzer pipeline after established event selection.
++- Added representative synthetic fixtures for strong beats, dense/fast onsets and repeating beats across Easy/Normal/Hard/Expert.
++- Confirmed deterministic seed behavior and unchanged chart schema.
++- No v5 Chart Planner/Phrase Planner/EXTREME/platform-variant work was introduced.
++
++### Version / CI
++- Release version moved to `4.8.0-rc.1` only through `web/VERSION`.
++- Android Gradle still consumes `../web/VERSION` for `versionName`.
++- Android build workflow now triggers when `web/VERSION` changes and verifies the built APK `versionName` exactly matches `web/VERSION`.
++- Railway/version/revision verification structure remains intact.
++
++## 2. Existing behavior intentionally preserved
++- Library, songs, charts and records.
++- `originalTitle` / `displayTitle`.
++- `originalThumbnail` / `customCover` and artwork priority.
++- Note Speed, Global Timing Offset and Song Timing Offset.
++- Settings.
++- Persistent Queue data and the existing `ChartJobStore` / `ChartJobService` processing model.
++- Single/multiple URL queueing, retry/cancel, per-job temp isolation, serial heavy processing, notification/background work.
++- Existing SFX implementation; no large SFX redesign was done in v4.8.
++
++## 3. DB / migration
++No new DB migration is required for v4.8. Existing v4.75 additive IndexedDB v3 data is reused. No database reset, destructive migration, uninstall/reinstall path, or Library clearing was added.
++
++## 4. Chart AI fixture observations
++The v4.8 audit fixtures all generated valid QC-passing charts with deterministic output. Difficulty density was monotonic on the strong-beat fixture. Some synthetic sources contain too little musical variety to distinguish every difficulty (for example the repeated kick fixture can saturate at the same event count), so these fixtures are regression tests rather than proof of real-song musical quality.
++
++Real-song listening/play quality still requires device/manual sampling before release.
++
++## 5. Completion state
++Automated/source verification is strong enough for an RC, but the release gate explicitly requires a signed Android build plus physical-device checks. Therefore this build is **not** marked v4.8 COMPLETE.
++
++Final status: **v4.8 RC — HOLD FOR DEVICE VERIFICATION**.
++
++## 6. Known limitations
++- This patch is based on the archived v4.75 integrated snapshot, not a live read of GitHub main. Any later manual main changes must be preserved during manual application.
++- Web Vitest/Vite/typecheck/lint and Android Gradle/signed APK could not be executed in this environment because dependencies/SDK tooling are incomplete.
++- The Android/Web version gate intentionally blocks an APK when production Web has not yet been deployed to the same `web/VERSION`; deploy Web first.
++- Chart AI v2 passed analyzer/QC fixtures, but real-song musical feel is still a manual/device gate.
++- SFX was only regression-protected; the requested larger SFX redesign remains deferred.
++
++## 7. Next step
++1. Apply `BEATDASH-v4.75-to-v4.8.0-rc.1.patch` to the current main with `git apply --check` first, resolving any later-main overlap semantically instead of overwriting files.
++2. Push `4.8.0-rc.1` and let CI run Web tests/build/lint plus signed Android build.
++3. Deploy Railway/Web `4.8.0-rc.1` before installing/testing the matching APK so the stale-Web gate can pass.
++4. Update-install the signed APK and execute `V4_8_ANDROID_DEVICE_CHECKLIST.md`.
++5. If every gate passes, change only `web/VERSION` to `4.8.0`, rebuild/deploy all release surfaces, and perform the final smoke check.
+diff --git a/docs/V4_8_TEST_REPORT.md b/docs/V4_8_TEST_REPORT.md
+new file mode 100644
+index 0000000..aa82da5
+--- /dev/null
++++ b/docs/V4_8_TEST_REPORT.md
+@@ -0,0 +1,69 @@
++# BEATDASH::Revive v4.8 test report
++
++Status: **v4.8 RC — HOLD FOR DEVICE VERIFICATION**
++
++## AUTO PASS
++
++- `python -m pytest -q scripts/tests` — **20/20 PASS**
++  - Queue/background source regression
++  - deployment/version verifier regression
++  - Android v4.8 source/access-path checks
++  - START/countdown source contract checks
++  - version Single Source of Truth checks
++- `python -m pytest -q web/backend/test_app.py` — **8/8 PASS**
++- `python -m pytest -q web/analyzer/tests` — **109/109 PASS**, 4 upstream/deprecation warnings
++- Python `compileall` for backend/analyzer/scripts — **PASS**
++- Android `ByteRangeTest` — **14/14 PASS**
++- TS/TSX syntax transpile using available global TypeScript — **59 files / 0 syntax errors**
++- Android Manifest/resource XML parse — **12 files / 0 XML errors**
++- Kotlin compiler parser-level scan — **0 syntax/parser markers**; full Android references are unresolved without Android SDK/classpath, so this is not an Android compile PASS.
++- Standalone compiled game-state audit:
++  - Tap + Tap — PASS
++  - Tap + Hold + Hold — PASS
++  - Hold-held + Tap + Flick — PASS
++  - Hold + Hold completion — PASS
++  - FAST/Great negative-diff sign — PASS
++  - SLOW/Great positive-diff sign — PASS
++  - Perfect Streak reset/restart — PASS
++  - Miss resets Combo/Perfect Streak — PASS
++- `git diff --check` — PASS
++- MainActivity `R.id` references vs `activity_main.xml` — **21/21 matched, 0 missing**
++- No unresolved Git conflict markers found.
++- No `requireStartGesture` runtime contract remains.
++- No destructive DB operation was introduced in the v4.8 diff.
++
++## AUTO FAIL
++
++None among tests that were actually executable.
++
++## NOT VERIFIED — environment limitation
++
++- Web Vitest: local dependency tree is incomplete (`vitest` binary unavailable).
++- Web `tsc -b` / Vite production build / oxlint: `npm ci` could not complete in the execution environment; therefore **not claimed PASS**.
++- Python Ruff: `ruff` is not installed in this execution environment.
++- Android Gradle release build: system Gradle/Android SDK classpath is unavailable here.
++- Signed APK verification: requires GitHub Actions or a configured Android build environment.
++- Docker image build: Docker executable is unavailable here.
++- Live Railway deployment/version convergence: not performed here.
++
++These items must not be interpreted as failures; they are explicitly unverified.
++
++## DEVICE VERIFICATION REQUIRED
++
++- Update-install over existing v4.75 without uninstalling.
++- Native Android home layout on phone portrait and tablet landscape.
++- PLAY -> prepare -> 3 -> 2 -> 1 -> automatic playback with no START button.
++- Restart/Retry follows the same startup path.
++- Background/foreground during countdown never starts from an old delayed callback.
++- No judgement/Miss before media actually starts.
++- Tap+Tap, Tap+Hold, Hold+Hold, Hold+Tap, Hold+Flick multi-touch combinations.
++- FAST/SLOW and Perfect Streak visual behavior.
++- Custom Cover native picker: JPEG/JPG/PNG/WebP, persistence after restart, Restore Original.
++- Feedback path: Android Settings -> Web Settings -> Feedback.
++- Original thumbnail remains intact.
++- Queue/background/notification/retry/cancel/recreation regression.
++- Representative real-song Chart AI v2 playtest on Easy/Normal/Hard/Expert.
++- SFX regression only; no major v4.8 SFX redesign expected.
++
++## Release decision
++Because Android build/device gates remain, status is **v4.8 RC — HOLD FOR DEVICE VERIFICATION**.
+diff --git a/scripts/tests/test_v48_android_source.py b/scripts/tests/test_v48_android_source.py
+new file mode 100644
+index 0000000..a7a7e41
+--- /dev/null
++++ b/scripts/tests/test_v48_android_source.py
+@@ -0,0 +1,59 @@
++import unittest
++from pathlib import Path
++import xml.etree.ElementTree as ET
++
++ROOT = Path(__file__).resolve().parents[2]
++
++class V48AndroidSourceTests(unittest.TestCase):
++    def test_home_layout_is_card_based_and_keeps_queue_ids(self):
++        layout = ROOT / "android/app/src/main/res/layout/activity_main.xml"
++        ET.parse(layout)
++        text = layout.read_text()
++        for token in ("contentContainer", "queueSummary", "jobQueue", "batchAddButton", "libraryButton", "settingsButton"):
++            self.assertIn(token, text)
++        self.assertIn("@drawable/bg_card", text)
++
++    def test_queue_logic_is_preserved(self):
++        text = (ROOT / "android/app/src/main/java/com/rhythmlab/companion/MainActivity.kt").read_text()
++        for token in ("ChartJobStore", "ChartJobService.start", "ChartJobService.retry", "ChartJobService.cancel", "recoverInterrupted"):
++            self.assertIn(token, text)
++        self.assertIn("applyResponsiveContentWidth", text)
++
++    def test_webview_version_gate_prevents_stale_remote_ui(self):
++        play = (ROOT / "android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt").read_text()
++        main = (ROOT / "web/src/main.tsx").read_text()
++        self.assertIn("WebSettings.LOAD_NO_CACHE", play)
++        self.assertIn("View.INVISIBLE", play)
++        self.assertIn("__BEATDASH_VERSION__", play)
++        self.assertIn("__BEATDASH_VERSION__", main)
++        self.assertIn("beatdash:resume", play)
++
++    def test_native_cover_guardrails(self):
++        play = (ROOT / "android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt").read_text()
++        for mime in ("image/jpeg", "image/png", "image/webp"):
++            self.assertIn(mime, play)
++        self.assertIn("12 * 1024 * 1024", play)
++        self.assertIn("beatdash:native-cover-error", play)
++        detail = (ROOT / "web/src/components/v4/SongDetailScreen.tsx").read_text()
++        self.assertIn("beatdash:native-cover-error", detail)
++
++    def test_data_paths_have_no_destructive_migration_calls(self):
++        candidates = [
++            ROOT / "web/src/library/db.ts",
++            ROOT / "android/app/src/main/java/com/rhythmlab/companion/SavedSongStore.kt",
++            ROOT / "android/app/src/main/java/com/rhythmlab/companion/ChartJobStore.kt",
++        ]
++        combined = "\
++".join(p.read_text() for p in candidates)
++        self.assertNotIn("deleteDatabase(", combined)
++        self.assertNotIn("fallbackToDestructiveMigration", combined)
++
++    def test_feedback_route_is_reachable_from_settings(self):
++        app = (ROOT / "web/src/App.tsx").read_text()
++        settings = (ROOT / "web/src/components/v4/SettingsScreen.tsx").read_text()
++        self.assertIn('view === "feedback"', app)
++        self.assertIn('nav("feedback")', app)
++        self.assertIn("onFeedback", settings)
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/scripts/tests/test_v48_start_flow_source.py b/scripts/tests/test_v48_start_flow_source.py
+new file mode 100644
+index 0000000..b87aac3
+--- /dev/null
++++ b/scripts/tests/test_v48_start_flow_source.py
+@@ -0,0 +1,40 @@
++import unittest
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++
++
++class V48StartFlowSourceTests(unittest.TestCase):
++    def test_redundant_start_contract_is_removed(self):
++        game = (ROOT / "web/src/components/GameScreen.tsx").read_text()
++        app = (ROOT / "web/src/App.tsx").read_text()
++        self.assertNotIn("requireStartGesture", game)
++        self.assertNotIn("requireStartGesture", app)
++        self.assertNotIn(">START<", game)
++        self.assertIn('type StartupPhase = "preparing" | "countdown" | "playing"', game)
++
++    def test_countdown_is_media_ready_and_lifecycle_gated(self):
++        game = (ROOT / "web/src/components/GameScreen.tsx").read_text()
++        for token in (
++            "mediaPrepared",
++            "mediaError",
++            "lifecycleBlocked",
++            "document.hidden",
++            "startupGeneration",
++            'window.addEventListener("beatdash:pause"',
++            'window.addEventListener("beatdash:resume"',
++        ):
++            self.assertIn(token, game)
++        self.assertIn("const loopActive = gameStarted && !songEnded", game)
++        # Initial media-error retry must return through prepare/countdown instead of bypassing it.
++        self.assertIn('setMediaPrepared(false)', game)
++        self.assertIn('setStartupPhase("preparing")', game)
++
++    def test_note_speed_remains_visual_only_contract(self):
++        game = (ROOT / "web/src/components/GameScreen.tsx").read_text()
++        self.assertIn("시각적 스크롤만 바꾸고 chart/media/judgement time은 바꾸지 않는다", game)
++        self.assertIn("applyTimingOffsetSec(mediaTimeSec, lockedTimingOffsetMs)", game)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/scripts/tests/test_version_source.py b/scripts/tests/test_version_source.py
+index 8103ca0..c63f0db 100644
+--- a/scripts/tests/test_version_source.py
++++ b/scripts/tests/test_version_source.py
+@@ -3,9 +3,9 @@ ROOT=pathlib.Path(__file__).resolve().parents[2]
+ class VersionSourceTests(unittest.TestCase):
+  def test_single_release_source_propagation(self):
+   version=(ROOT/'web/VERSION').read_text().strip(); self.assertRegex(version,r'^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$')
+-  backend=(ROOT/'web/backend/app.py').read_text(); deploy=(ROOT/'.github/workflows/deploy-railway.yml').read_text(); verify=(ROOT/'scripts/verify_container.sh').read_text(); gradle=(ROOT/'android/app/build.gradle.kts').read_text()
+-  self.assertIn('ROOT / "VERSION"',backend); self.assertIn('web/VERSION',deploy); self.assertIn('web/VERSION',verify); self.assertIn('../web/VERSION',gradle)
+-  for text in (backend,deploy,verify,gradle):
++  backend=(ROOT/'web/backend/app.py').read_text(); deploy=(ROOT/'.github/workflows/deploy-railway.yml').read_text(); android_workflow=(ROOT/'.github/workflows/build-android.yml').read_text(); verify=(ROOT/'scripts/verify_container.sh').read_text(); gradle=(ROOT/'android/app/build.gradle.kts').read_text(); play=(ROOT/'android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt').read_text(); main=(ROOT/'web/src/main.tsx').read_text()
++  self.assertIn('ROOT / "VERSION"',backend); self.assertIn('web/VERSION',deploy); self.assertIn('web/VERSION',android_workflow); self.assertIn('web/VERSION',verify); self.assertIn('../web/VERSION',gradle); self.assertIn('__BEATDASH_VERSION__',play); self.assertIn('__BEATDASH_VERSION__',main); self.assertIn("versionName='$EXPECTED_VERSION'",android_workflow)
++  for text in (backend,deploy,verify,gradle,android_workflow,play,main):
+    self.assertNotIn('"4.0.0"',text); self.assertNotIn('"4.75.0-rc.phase1"',text); self.assertNotIn('"4.75.0-rc.phase2"',text)
+  def test_workflow_has_no_literal_release_comparison(self):
+   text=(ROOT/'.github/workflows/deploy-railway.yml').read_text(); self.assertNotRegex(text,r'health\.get\(["\']version["\']\)\s*==\s*["\']\d')
+diff --git a/web/BUILD_REVISION b/web/BUILD_REVISION
+index eeeb6ba..fd56cc9 100644
+--- a/web/BUILD_REVISION
++++ b/web/BUILD_REVISION
+@@ -1 +1 @@
+-v4.75-rc-phase3-integrated
++v4.8.0-rc.1-local
+diff --git a/web/VERSION b/web/VERSION
+index 2f09a04..4a96cce 100644
+--- a/web/VERSION
++++ b/web/VERSION
+@@ -1 +1 @@
+-4.75.0-rc.phase3
++4.8.0-rc.1
+diff --git a/web/analyzer/tests/test_v48_chart_ai_pipeline.py b/web/analyzer/tests/test_v48_chart_ai_pipeline.py
+new file mode 100644
+index 0000000..14634a5
+--- /dev/null
++++ b/web/analyzer/tests/test_v48_chart_ai_pipeline.py
+@@ -0,0 +1,38 @@
++from chartgen.pipeline import generate_chart_from_signal
++from synth import SR, make_accent, make_fast_180, make_kick_120
++
++DIFFICULTIES = ("easy", "normal", "hard", "expert")
++
++def _generate(signal, difficulty, seed=475):
++    return generate_chart_from_signal(signal, SR, difficulty=difficulty, seed=seed, title="v4.8 fixture")
++
++def test_chart_ai_v2_is_active_for_representative_pipeline_fixtures():
++    fixtures = (make_accent(), make_fast_180(), make_kick_120())
++    for signal in fixtures:
++        for difficulty in DIFFICULTIES:
++            result = _generate(signal, difficulty)
++            stats = result.report["filterStats"]["chartAiV2"]
++            assert stats["input_count"] >= stats["output_count"]
++            assert stats["output_count"] == result.report["filteredEventCount"]
++            assert stats["protected_accents"] <= stats["input_count"]
++            assert result.report["finalNoteCount"] <= result.report["filteredEventCount"]
++
++def test_representative_chart_generation_remains_deterministic():
++    signal = make_fast_180()
++    a = _generate(signal, "hard", seed=8128)
++    b = _generate(signal, "hard", seed=8128)
++    assert a.chart == b.chart
++    assert a.report["patternUsage"] == b.report["patternUsage"]
++    assert a.report["filterStats"]["chartAiV2"] == b.report["filterStats"]["chartAiV2"]
++
++def test_strong_beats_are_protected_and_difficulty_density_is_not_inverted():
++    signal = make_accent()
++    results = [_generate(signal, difficulty) for difficulty in DIFFICULTIES]
++    counts = [result.report["finalNoteCount"] for result in results]
++    assert counts == sorted(counts)
++    assert all(result.report["filterStats"]["chartAiV2"]["protected_accents"] > 0 for result in results)
++
++def test_repeated_beat_fixture_uses_pattern_repetition_without_schema_change():
++    result = _generate(make_kick_120(), "hard")
++    assert result.report["patternUsage"].get("repeat", 0) > 0
++    assert set(result.chart) == {"title", "artist", "bpm", "offset", "difficulty", "level", "notes"}
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 1e2108f..b14bbf2 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -261,14 +261,14 @@ function App() {
+ 
+   if (view === "play" && libraryPlay) {
+     const { bundle, chart, mediaUrl } = libraryPlay;
+-    return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("detail")}>← 곡 상세</button><span>{bundle.song.title}</span><span className="companion-badge">LIBRARY</span></div><GameScreen key={`${chart.id}:${chart.chartVersion}`} chart={chart.chart} songTitle={bundle.song.title} mediaUrl={mediaUrl} mediaKind={bundle.song.mediaKind} mediaMuted={false} requireStartGesture noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => nav("detail")} onResult={(result) => savePlayResult({ songId: bundle.song.id, chartId: chart.id, chartVersion: chart.chartVersion, difficulty: chart.difficulty, result, offsetMs: combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs) }).then((feedback) => { void refreshLibrary(); return feedback; })} /></main>;
++    return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("detail")}>← 곡 상세</button><span>{bundle.song.title}</span><span className="companion-badge">LIBRARY</span></div><GameScreen key={`${chart.id}:${chart.chartVersion}`} chart={chart.chart} songTitle={bundle.song.title} mediaUrl={mediaUrl} mediaKind={bundle.song.mediaKind} mediaMuted={false} noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => nav("detail")} onResult={(result) => savePlayResult({ songId: bundle.song.id, chartId: chart.id, chartVersion: chart.chartVersion, difficulty: chart.difficulty, result, offsetMs: combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs) }).then((feedback) => { void refreshLibrary(); return feedback; })} /></main>;
+   }
+ 
+   if (!analysis) return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
+   if (view === "analysis") return <>{libraryErrorBanner}<AnalysisSummary data={analysis} saved={savedCompanion} onPlay={() => nav("play")} onReset={() => void resetAnalysis()} noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} /></>;
+ 
+   const parsed = parseChart(JSON.stringify(analysis.chart));
+-  return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("analysis")}>← 곡 설정</button><span>{analysis.originalName}</span>{analysisBundle && <span className="companion-badge">LIBRARY SAVED</span>}</div><GameScreen key={analysis.id} chart={parsed} mediaUrl={analysis.mediaUrl} mediaKind={analysis.mediaKind} mediaMuted={false} requireStartGesture resultExtra={savedCompanion ? undefined : <EvaluationPanel analysisId={analysis.id} songName={analysis.chart.title} />} noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => analysisBundle ? void openSong(analysisBundle.song.id) : nav("analysis")} onResult={analysisBundle ? (result) => savePlayResult({ songId: analysisBundle.song.id, chartId: analysisBundle.charts[0].id, chartVersion: analysisBundle.charts[0].chartVersion, difficulty: analysisBundle.charts[0].difficulty, result, offsetMs: timingOffsetMs }).then((feedback) => { void refreshLibrary(); return feedback; }) : undefined} /></main>;
++  return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("analysis")}>← 곡 설정</button><span>{analysis.originalName}</span>{analysisBundle && <span className="companion-badge">LIBRARY SAVED</span>}</div><GameScreen key={analysis.id} chart={parsed} mediaUrl={analysis.mediaUrl} mediaKind={analysis.mediaKind} mediaMuted={false} resultExtra={savedCompanion ? undefined : <EvaluationPanel analysisId={analysis.id} songName={analysis.chart.title} />} noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => analysisBundle ? void openSong(analysisBundle.song.id) : nav("analysis")} onResult={analysisBundle ? (result) => savePlayResult({ songId: analysisBundle.song.id, chartId: analysisBundle.charts[0].id, chartVersion: analysisBundle.charts[0].chartVersion, difficulty: analysisBundle.charts[0].difficulty, result, offsetMs: timingOffsetMs }).then((feedback) => { void refreshLibrary(); return feedback; }) : undefined} /></main>;
+ }
+ 
+ export default App;
+diff --git a/web/src/__tests__/gameState.test.ts b/web/src/__tests__/gameState.test.ts
+index 3a06f3e..6d73512 100644
+--- a/web/src/__tests__/gameState.test.ts
++++ b/web/src/__tests__/gameState.test.ts
+@@ -3,6 +3,7 @@ import {
+   attemptFlick,
+   attemptHoldRelease,
+   attemptHoldStart,
++  attemptLanePress,
+   attemptTap,
+   calculateAccuracyPercent,
+   createInitialGameState,
+@@ -46,6 +47,7 @@ describe("Tap 판정 및 콤보/정확도", () => {
+     const holdNoteRuntime = state.notes[2];
+     expect(holdNoteRuntime.status).toBe("missed");
+     expect(state.combo).toBe(0); // Miss로 콤보 초기화
++    expect(state.perfectStreak).toBe(0);
+   });
+ 
+   it("Perfect Streak는 Perfect에서만 이어지고 Great/Good에서 종료된다", () => {
+@@ -157,6 +159,50 @@ describe("Flick 판정", () => {
+   });
+ });
+ 
++
++describe("v4.8 multi-lane regression", () => {
++  it("Tap + Tap을 같은 시각에 서로 다른 레인에서 독립 처리한다", () => {
++    const chart = makeChart({ notes: [
++      { time: 1, lane: 0, type: "tap" },
++      { time: 1, lane: 1, type: "tap" },
++    ] });
++    let state = createInitialGameState(chart, { failEnabled: false });
++    state = attemptLanePress(state, 0, 1);
++    state = attemptLanePress(state, 1, 1);
++    expect(state.notes.map(n => n.status)).toEqual(["hit", "hit"]);
++    expect(state.combo).toBe(2);
++  });
++
++  it("Tap + Hold 및 Hold + Hold 동시 입력이 서로를 소비하지 않는다", () => {
++    let state = createInitialGameState(makeChart({ notes: [
++      { time: 1, lane: 0, type: "tap" },
++      { time: 1, lane: 1, type: "hold", duration: 1 },
++      { time: 1, lane: 2, type: "hold", duration: 1 },
++    ] }), { failEnabled: false });
++    state = attemptLanePress(state, 0, 1);
++    state = attemptLanePress(state, 1, 1);
++    state = attemptLanePress(state, 2, 1);
++    expect(state.notes[0].status).toBe("hit");
++    expect(state.notes[1].status).toBe("holding");
++    expect(state.notes[2].status).toBe("holding");
++  });
++
++  it("Hold 유지 중 다른 레인의 Tap/Flick 판정이 Hold 상태를 깨지 않는다", () => {
++    let state = createInitialGameState(makeChart({ notes: [
++      { time: 1, lane: 0, type: "hold", duration: 2 },
++      { time: 1.3, lane: 1, type: "tap" },
++      { time: 1.6, lane: 2, type: "flick" },
++    ] }), { failEnabled: false });
++    state = attemptLanePress(state, 0, 1);
++    state = attemptLanePress(state, 1, 1.3);
++    expect(state.notes[0].status).toBe("holding");
++    state = attemptFlick(state, 2, 1.6);
++    expect(state.notes[0].status).toBe("holding");
++    expect(state.notes[1].status).toBe("hit");
++    expect(state.notes[2].status).toBe("hit");
++  });
++});
++
+ describe("곡(영상) 종료 처리 (v0.2 회귀 수정)", () => {
+   it("영상이 끝나 시간이 무한대로 정산되면 남은 pending 노트는 Miss, 게임은 finished", () => {
+     let state = createInitialGameState(makeChart(), { failEnabled: false });
+diff --git a/web/src/__tests__/mediaLifecycle.test.tsx b/web/src/__tests__/mediaLifecycle.test.tsx
+index 20b4fb3..e9c3840 100644
+--- a/web/src/__tests__/mediaLifecycle.test.tsx
++++ b/web/src/__tests__/mediaLifecycle.test.tsx
+@@ -13,16 +13,20 @@ let root: Root, container: HTMLDivElement;
+ let frame: FrameRequestCallback | null;
+ let play = vi.fn<() => Promise<void>>();
+ let pause = vi.fn<() => void>();
+-const debug = () => (window as unknown as { __RHYTHM_DEBUG__: { state: { notes: { status: string }[]; totalJudged: number }; paused: boolean; gameStarted: boolean } }).__RHYTHM_DEBUG__;
++const debug = () => (window as unknown as { __RHYTHM_DEBUG__: { state: { notes: { status: string }[]; totalJudged: number }; paused: boolean; gameStarted: boolean; startupPhase: string; lifecycleBlocked: boolean } }).__RHYTHM_DEBUG__;
+ async function render(kind: "audio" | "video" = "video", offset = 0) {
+-  await act(async () => { root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind={kind} mediaMuted={false} requireStartGesture timingOffsetMs={offset} />); });
++  await act(async () => { root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind={kind} mediaMuted={false} timingOffsetMs={offset} />); });
+ }
+ async function click(text: string) {
+   const b = Array.from(container.querySelectorAll("button")).find(b => b.textContent?.trim() === text);
+   expect(b).toBeDefined();
+   await act(async () => b!.click());
+ }
++async function prepareMedia() {
++  await act(async () => { container.querySelector("video,audio")!.dispatchEvent(new Event("canplay")); });
++}
+ async function autoStart() {
++  await prepareMedia();
+   await act(async () => { await vi.advanceTimersByTimeAsync(2200); });
+   await act(async () => Promise.resolve());
+ }
+@@ -55,6 +59,36 @@ describe("media lifecycle and input integration", () => {
+     await act(async () => root.render(null));
+     expect(pause).toHaveBeenCalled();
+   });
++  it("has no redundant START action and waits for media preparation before countdown", async () => {
++    await render();
++    expect(Array.from(container.querySelectorAll("button")).some(button => button.textContent?.trim().toUpperCase() === "START")).toBe(false);
++    expect(debug().startupPhase).toBe("preparing");
++    await act(async () => vi.advanceTimersByTimeAsync(3000));
++    expect(play).not.toHaveBeenCalled();
++    expect(debug().state.totalJudged).toBe(0);
++    await prepareMedia();
++    expect(debug().startupPhase).toBe("countdown");
++  });
++  it("does not advance judgement or create Miss during countdown", async () => {
++    await render(); await prepareMedia();
++    (container.querySelector("video,audio") as HTMLMediaElement).currentTime = 12;
++    await act(async () => { frame?.(12000); await vi.advanceTimersByTimeAsync(1400); });
++    expect(debug().gameStarted).toBe(false);
++    expect(debug().state.totalJudged).toBe(0);
++  });
++  it("backgrounding during countdown cancels delayed start until an explicit resume", async () => {
++    await render(); await prepareMedia();
++    await act(async () => vi.advanceTimersByTimeAsync(700));
++    await act(async () => { window.dispatchEvent(new Event("beatdash:pause")); });
++    await act(async () => vi.advanceTimersByTimeAsync(3000));
++    expect(play).not.toHaveBeenCalled();
++    expect(debug().gameStarted).toBe(false);
++    expect(debug().lifecycleBlocked).toBe(true);
++    await act(async () => { window.dispatchEvent(new Event("beatdash:resume")); });
++    expect(debug().startupPhase).toBe("countdown");
++    await act(async () => vi.advanceTimersByTimeAsync(2200));
++    expect(play).toHaveBeenCalledTimes(1);
++  });
+   it("does not start before gesture; rejected play is visible and retry works", async () => {
+     await render(); expect(play).not.toHaveBeenCalled();
+     play.mockRejectedValueOnce(new Error("blocked")); await autoStart();
+@@ -113,12 +147,12 @@ describe("v4 asynchronous result persistence", () => {
+   it("reports a finished run when library caching completes later", async () => {
+     await render(); await autoStart(); await advance(10);
+     const onResult = vi.fn().mockResolvedValue(undefined);
+-    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" requireStartGesture onResult={onResult} />));
++    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" onResult={onResult} />));
+     expect(onResult).toHaveBeenCalledTimes(1);
+   });
+   it("shows save failure and retries without replaying", async () => {
+     const onResult = vi.fn().mockRejectedValueOnce(new Error("QuotaExceeded")).mockResolvedValueOnce(undefined);
+-    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" requireStartGesture onResult={onResult} />));
++    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" onResult={onResult} />));
+     await autoStart(); await advance(10);
+     expect(container.querySelector('[role="alert"]')?.textContent).toContain("QuotaExceeded");
+     await click("기록 저장 다시 시도"); expect(onResult).toHaveBeenCalledTimes(2);
+@@ -127,7 +161,7 @@ describe("v4 asynchronous result persistence", () => {
+   it("does not attach old asynchronous achievements after restart", async () => {
+     let complete!: (value: { clearType: "PERFECT_COMBO"; newHighScore: boolean }) => void;
+     const onResult = vi.fn(() => new Promise(resolve => { complete = resolve; }));
+-    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" requireStartGesture onResult={onResult as never} />));
++    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" onResult={onResult as never} />));
+     await autoStart(); await advance(10);
+     // v4.75 waits for the actual media end and 600ms transition, not the final note.
+     await act(async () => container.querySelector('video')!.dispatchEvent(new Event('ended')));
+@@ -183,7 +217,7 @@ describe("hotfix bounded media recovery", () => {
+     expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(1); expect(play).toHaveBeenCalledTimes(1);
+     expect(debug().paused).toBe(true);
+   });
+-  it("stalled timer does nothing after pause or before START", async () => {
++  it("stalled timer does nothing after pause or before gameplay begins", async () => {
+     vi.useFakeTimers();
+     try {
+       await render(); await dispatch("waiting"); await act(async () => vi.advanceTimersByTime(3001));
+@@ -264,7 +298,7 @@ describe("v4.75 independent Result lifecycle", () => {
+     vi.useFakeTimers();
+     try {
+       const save = vi.fn().mockResolvedValue(undefined);
+-      await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" requireStartGesture onResult={save}/>));
++      await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" onResult={save}/>));
+       await autoStart(); await endSong();
+       expect(save).toHaveBeenCalledTimes(1);
+       expect(debug().state.totalJudged).toBe(4);
+@@ -276,7 +310,7 @@ describe("v4.75 independent Result lifecycle", () => {
+   });
+   it("applies persisted visual/audio settings without changing judgement", async () => {
+     const { DEFAULT_PREFERENCES } = await import('../settings/preferences');
+-    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" requireStartGesture mediaMuted={false}
++    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaMuted={false}
+       preferences={{ ...DEFAULT_PREFERENCES, combo: false, judgementText: false, fastSlow: false, backgroundVideo: false, effects: 'low' }}
+       audioSettings={{ masterVolume: .5, musicVolume: .4, sfxVolume: 0, sfxEnabled: false }}/>));
+     expect(container.querySelector('video')!.volume).toBeCloseTo(.2);
+diff --git a/web/src/components/GameScreen.tsx b/web/src/components/GameScreen.tsx
+index ef059d8..b49512a 100644
+--- a/web/src/components/GameScreen.tsx
++++ b/web/src/components/GameScreen.tsx
+@@ -37,7 +37,6 @@ interface Props {
+   mediaUrl: string;
+   mediaKind?: "audio" | "video";
+   mediaMuted?: boolean;
+-  requireStartGesture?: boolean;
+   resultExtra?: ReactNode;
+   /** 1.0~20.0. 시각적 스크롤만 바꾸고 chart/media/judgement time은 바꾸지 않는다. */
+   noteSpeed?: number;
+@@ -47,6 +46,8 @@ interface Props {
+   onResult?: (result: GameResult) => RecordFeedback | void | Promise<RecordFeedback | void>;
+ }
+ 
++type StartupPhase = "preparing" | "countdown" | "playing";
++
+ interface MvOptions {
+   on: boolean;
+   brightness: number;
+@@ -84,6 +85,9 @@ export function GameScreen({
+   const [paused, setPaused] = useState(false);
+   const [currentTimeSec, setCurrentTimeSec] = useState(() => applyTimingOffsetSec(0, lockedTimingOffsetMs));
+   const [gameStarted, setGameStarted] = useState(false);
++  const [startupPhase, setStartupPhase] = useState<StartupPhase>("preparing");
++  const [mediaPrepared, setMediaPrepared] = useState(false);
++  const [lifecycleBlocked, setLifecycleBlocked] = useState(false);
+   const [countdown, setCountdown] = useState<number | null>(3);
+   const [mv, setMv] = useState<MvOptions>({ on: preferences.backgroundVideo, brightness: preferences.backgroundBrightness, overlayOpacity: 0.5, blurPx: 0 });
+   const [pressedLanes, setPressedLanes] = useState<boolean[]>([false, false, false, false]);
+@@ -103,6 +107,7 @@ export function GameScreen({
+   const resultSoundPlayed = useRef(false);
+   const lastSfxSequence = useRef<number | null>(null);
+   const mediaRecoveryTimer = useRef<number | null>(null);
++  const startupGeneration = useRef(0);
+   const recoveryAbort = useRef<AbortController | null>(null);
+   const recoveryPosition = useRef<number | null>(null);
+   const recoveryAttempts = useRef(0);
+@@ -137,12 +142,14 @@ export function GameScreen({
+       pausedRef.current = false;
+       setPaused(false);
+       setGameStarted(true);
++      setStartupPhase("playing");
+       recoveryPosition.current = null;
+       recoveryAttempts.current = 0;
+     } catch (error) {
+       if (generation !== playGeneration.current) return;
+-      pausedRef.current = true;
+-      setPaused(true);
++      pausedRef.current = false;
++      setPaused(false);
++      setStartupPhase("preparing");
+       setMediaError(`재생할 수 없습니다. ${(error as Error).message}`);
+     } finally { if (recoveryAbort.current === controller) recoveryAbort.current = null; }
+   }, [cancelMediaRecovery]);
+@@ -150,22 +157,32 @@ export function GameScreen({
+   const cancelPlayback = useCallback(() => { playGeneration.current++; cancelMediaRecovery(); }, [cancelMediaRecovery]);
+   useEffect(() => () => { cancelPlayback(); pauseVideo(mediaRef.current); }, [cancelPlayback]);
+ 
++  const markMediaPrepared = useCallback(() => { setMediaPrepared(true); }, []);
++
+   useEffect(() => {
+-    if (gameStarted || showResult || pausedRef.current) return;
++    if (startupPhase !== "preparing" || !mediaPrepared || mediaError || lifecycleBlocked || gameStarted || showResult || pausedRef.current || document.hidden) return;
+     setCountdown(3);
++    setStartupPhase("countdown");
++  }, [startupPhase, mediaPrepared, mediaError, lifecycleBlocked, gameStarted, showResult]);
++
++  useEffect(() => {
++    if (startupPhase !== "countdown" || gameStarted || showResult) return;
++    const generation = ++startupGeneration.current;
+     let value = 3;
++    setCountdown(value);
+     const timer = window.setInterval(() => {
++      if (generation !== startupGeneration.current) { window.clearInterval(timer); return; }
++      if (document.hidden) { window.clearInterval(timer); setCountdown(3); setStartupPhase("preparing"); return; }
+       value -= 1;
+       if (value <= 0) {
+-        if (document.hidden || !document.hasFocus()) { value = 3; setCountdown(3); return; }
+         window.clearInterval(timer);
+         setCountdown(null);
+         playStartSfx(audioSettings);
+         void startMedia();
+       } else setCountdown(value);
+     }, 700);
+-    return () => window.clearInterval(timer);
+-  }, [gameStarted, showResult, startMedia, audioSettings]);
++    return () => { startupGeneration.current++; window.clearInterval(timer); };
++  }, [startupPhase, gameStarted, showResult, startMedia, audioSettings]);
+ 
+   const loopActive = gameStarted && !songEnded;
+ 
+@@ -246,17 +263,36 @@ export function GameScreen({
+   }, [gameStarted, songEnded, startMedia, pauseGame]);
+ 
+   useEffect(() => {
+-    const hide = () => { if (document.hidden && gameStarted && !songEnded) pauseGame(); };
+-    const blur = () => { if (gameStarted && !songEnded) pauseGame(); };
+-    document.addEventListener("visibilitychange", hide);
+-    window.addEventListener("blur", blur);
+-    window.addEventListener("beatdash:pause", blur);
++    const freeze = () => {
++      if (songEnded || showResult) return;
++      if (gameStarted) { pauseGame(); return; }
++      startupGeneration.current++;
++      setLifecycleBlocked(true);
++      cancelPlayback();
++      pauseVideo(mediaRef.current);
++      setCountdown(3);
++      setStartupPhase("preparing");
++    };
++    const resumeStartup = () => {
++      if (gameStarted || songEnded || showResult) return;
++      setLifecycleBlocked(false);
++      setCountdown(3);
++      setStartupPhase("preparing");
++    };
++    const visibility = () => { if (document.hidden) freeze(); else resumeStartup(); };
++    document.addEventListener("visibilitychange", visibility);
++    window.addEventListener("blur", freeze);
++    window.addEventListener("focus", resumeStartup);
++    window.addEventListener("beatdash:pause", freeze);
++    window.addEventListener("beatdash:resume", resumeStartup);
+     return () => {
+-      document.removeEventListener("visibilitychange", hide);
+-      window.removeEventListener("blur", blur);
+-      window.removeEventListener("beatdash:pause", blur);
++      document.removeEventListener("visibilitychange", visibility);
++      window.removeEventListener("blur", freeze);
++      window.removeEventListener("focus", resumeStartup);
++      window.removeEventListener("beatdash:pause", freeze);
++      window.removeEventListener("beatdash:resume", resumeStartup);
+     };
+-  }, [gameStarted, songEnded, pauseGame]);
++  }, [gameStarted, songEnded, showResult, mediaPrepared, pauseGame, cancelPlayback]);
+ 
+   const setLanePressed = useCallback((lane: Lane, pressed: boolean) => {
+     setPressedLanes((prev) => {
+@@ -315,7 +351,10 @@ export function GameScreen({
+     reportedResult.current = false;
+     resultSoundPlayed.current = false;
+     restartVideo(mediaRef.current);
++    startupGeneration.current++;
+     setGameStarted(false);
++    setStartupPhase("preparing");
++    setMediaPrepared(Boolean(mediaRef.current && mediaRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA));
+     setCountdown(3);
+   }, [lockedTimingOffsetMs, cancelPlayback]);
+ 
+@@ -383,21 +422,25 @@ export function GameScreen({
+       currentTimeSec,
+       paused,
+       gameStarted,
++      startupPhase,
++      lifecycleBlocked,
+       noteSpeed: lockedNoteSpeed,
+       timingOffsetMs: lockedTimingOffsetMs,
+     };
+-  }, [state, currentTimeSec, paused, gameStarted, lockedNoteSpeed, lockedTimingOffsetMs]);
++  }, [state, currentTimeSec, paused, gameStarted, startupPhase, lifecycleBlocked, lockedNoteSpeed, lockedTimingOffsetMs]);
+ 
+   const handleEnded = () => { setPaused(false); setState(s => tick(s, Number.POSITIVE_INFINITY)); setSongEnded(true); };
+ 
+   const videoFilter = `brightness(${mv.brightness}) blur(${mv.blurPx}px)`;
+   const mediaNode = mediaKind === "audio" ? (
+-    <audio onEnded={handleEnded} ref={(node) => { mediaRef.current = node; }} src={mediaUrl} onError={() => { void recoverMedia("오디오 파일 오류"); }} onStalled={() => scheduleMediaRecovery("오디오 로딩 지연")} onWaiting={() => scheduleMediaRecovery("오디오 버퍼링")} onPlaying={clearMediaRecovery} preload="auto" />
++    <audio onEnded={handleEnded} ref={(node) => { mediaRef.current = node; }} src={mediaUrl} onLoadedMetadata={markMediaPrepared} onCanPlay={markMediaPrepared} onError={() => { void recoverMedia("오디오 파일 오류"); }} onStalled={() => scheduleMediaRecovery("오디오 로딩 지연")} onWaiting={() => scheduleMediaRecovery("오디오 버퍼링")} onPlaying={clearMediaRecovery} preload="auto" />
+   ) : (
+     <video
+       onEnded={handleEnded}
+       ref={(node) => { mediaRef.current = node; }}
+       src={mediaUrl}
++      onLoadedMetadata={markMediaPrepared}
++      onCanPlay={markMediaPrepared}
+       onError={() => { void recoverMedia("영상 파일 오류"); }}
+       onStalled={() => scheduleMediaRecovery("영상 로딩 지연")}
+       onWaiting={() => scheduleMediaRecovery("영상 버퍼링")}
+@@ -545,13 +588,23 @@ export function GameScreen({
+               <span>READY</span>
+               <strong>Speed {lockedNoteSpeed.toFixed(1)}</strong>
+               {lockedTimingOffsetMs !== 0 && <span className="start-offset">Offset {lockedTimingOffsetMs > 0 ? "+" : ""}{lockedTimingOffsetMs}ms</span>}
+-              <div className="countdown-number" role="status">{countdown ?? "GO"}</div>
+-              <small>자동으로 시작합니다 · 키보드 D F J K · Flick: 레인 키 + Space · 터치: 누르기/홀드, 위로 밀기 = Flick</small>
++              {startupPhase === "preparing" ? <div className="countdown-number preparing" role="status">READY</div> : <div className="countdown-number" role="status">{countdown ?? "GO"}</div>}
++              <small>{startupPhase === "preparing" ? "미디어 준비 중… 준비가 끝나면 3·2·1 후 자동 시작합니다." : "자동으로 시작합니다 · 키보드 D F J K · Flick: 레인 키 + Space · 터치: 누르기/홀드, 위로 밀기 = Flick"}</small>
+             </div>
+           </div>
+         )}
+-        {mediaError && <div className="media-error" role="alert"><p>{mediaError}</p><button onClick={() => { mediaRef.current?.load(); void startMedia(); }}>재생 다시 시도</button></div>}
+-        {paused && <PauseOverlay onResume={handlePauseToggle} onRestart={handleRestart} />}
++        {mediaError && <div className="media-error" role="alert"><p>{mediaError}</p><button onClick={() => {
++          const media = mediaRef.current;
++          setMediaError(null);
++          if (gameStarted) { void startMedia(); return; }
++          cancelPlayback();
++          startupGeneration.current++;
++          setMediaPrepared(false);
++          setCountdown(3);
++          setStartupPhase("preparing");
++          media?.load();
++        }}>재생 다시 시도</button></div>}
++        {paused && gameStarted && <PauseOverlay onResume={handlePauseToggle} onRestart={handleRestart} />}
+       </div>
+ 
+       {mediaKind === "video" && (
+diff --git a/web/src/components/v4/SongDetailScreen.tsx b/web/src/components/v4/SongDetailScreen.tsx
+index 1463472..400b2eb 100644
+--- a/web/src/components/v4/SongDetailScreen.tsx
++++ b/web/src/components/v4/SongDetailScreen.tsx
+@@ -77,10 +77,20 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged,
+       const data = (event as CustomEvent<string>).detail;
+       if (!data?.startsWith("data:image/")) return;
+       setCoverBusy(true);
++      setError(null);
+       void updateSongCustomCover(bundle.song.id, data).then(onChanged).catch((e: Error) => setError(e.message)).finally(() => setCoverBusy(false));
+     };
++    const onNativeCoverError = (event: Event) => {
++      const message = (event as CustomEvent<string>).detail;
++      setCoverBusy(false);
++      setError(message || "커버 이미지를 처리할 수 없습니다.");
++    };
+     window.addEventListener("beatdash:native-cover", onNativeCover);
+-    return () => window.removeEventListener("beatdash:native-cover", onNativeCover);
++    window.addEventListener("beatdash:native-cover-error", onNativeCoverError);
++    return () => {
++      window.removeEventListener("beatdash:native-cover", onNativeCover);
++      window.removeEventListener("beatdash:native-cover-error", onNativeCoverError);
++    };
+   }, [bundle.song.id, onChanged]);
+ 
+   const record = selected ? bests[selected.difficulty] : null;
+diff --git a/web/src/main.tsx b/web/src/main.tsx
+index bef5202..acc23a5 100644
+--- a/web/src/main.tsx
++++ b/web/src/main.tsx
+@@ -1,8 +1,13 @@
+ import { StrictMode } from 'react'
+ import { createRoot } from 'react-dom/client'
++import appVersion from '../VERSION?raw'
+ import './index.css'
+ import App from './App.tsx'
+ 
++// Android uses this to verify that the remotely served Web UI matches the APK release.
++// Keep this value sourced from web/VERSION so the release version remains single-source.
++;(window as Window & { __BEATDASH_VERSION__?: string }).__BEATDASH_VERSION__ = appVersion.trim()
++
+ createRoot(document.getElementById('root')!).render(
+   <StrictMode>
+     <App />

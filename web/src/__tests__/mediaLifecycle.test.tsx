@@ -13,16 +13,20 @@ let root: Root, container: HTMLDivElement;
 let frame: FrameRequestCallback | null;
 let play = vi.fn<() => Promise<void>>();
 let pause = vi.fn<() => void>();
-const debug = () => (window as unknown as { __RHYTHM_DEBUG__: { state: { notes: { status: string }[]; totalJudged: number }; paused: boolean; gameStarted: boolean } }).__RHYTHM_DEBUG__;
+const debug = () => (window as unknown as { __RHYTHM_DEBUG__: { state: { notes: { status: string }[]; totalJudged: number }; paused: boolean; gameStarted: boolean; startupPhase: string; lifecycleBlocked: boolean } }).__RHYTHM_DEBUG__;
 async function render(kind: "audio" | "video" = "video", offset = 0) {
-  await act(async () => { root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind={kind} mediaMuted={false} requireStartGesture timingOffsetMs={offset} />); });
+  await act(async () => { root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind={kind} mediaMuted={false} timingOffsetMs={offset} />); });
 }
 async function click(text: string) {
   const b = Array.from(container.querySelectorAll("button")).find(b => b.textContent?.trim() === text);
   expect(b).toBeDefined();
   await act(async () => b!.click());
 }
+async function prepareMedia() {
+  await act(async () => { container.querySelector("video,audio")!.dispatchEvent(new Event("canplay")); });
+}
 async function autoStart() {
+  await prepareMedia();
   await act(async () => { await vi.advanceTimersByTimeAsync(2200); });
   await act(async () => Promise.resolve());
 }
@@ -55,12 +59,48 @@ describe("media lifecycle and input integration", () => {
     await act(async () => root.render(null));
     expect(pause).toHaveBeenCalled();
   });
+  it("has no redundant START action and waits for media preparation before countdown", async () => {
+    await render();
+    expect(Array.from(container.querySelectorAll("button")).some(button => button.textContent?.trim().toUpperCase() === "START")).toBe(false);
+    expect(debug().startupPhase).toBe("preparing");
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    expect(play).not.toHaveBeenCalled();
+    expect(debug().state.totalJudged).toBe(0);
+    await prepareMedia();
+    expect(debug().startupPhase).toBe("countdown");
+  });
+  it("does not advance judgement or create Miss during countdown", async () => {
+    await render(); await prepareMedia();
+    (container.querySelector("video,audio") as HTMLMediaElement).currentTime = 12;
+    await act(async () => { frame?.(12000); await vi.advanceTimersByTimeAsync(1400); });
+    expect(debug().gameStarted).toBe(false);
+    expect(debug().state.totalJudged).toBe(0);
+  });
+  it("backgrounding during countdown cancels delayed start until an explicit resume", async () => {
+    await render(); await prepareMedia();
+    await act(async () => vi.advanceTimersByTimeAsync(700));
+    await act(async () => { window.dispatchEvent(new Event("beatdash:pause")); });
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    expect(play).not.toHaveBeenCalled();
+    expect(debug().gameStarted).toBe(false);
+    expect(debug().lifecycleBlocked).toBe(true);
+    await act(async () => { window.dispatchEvent(new Event("beatdash:resume")); });
+    expect(debug().startupPhase).toBe("countdown");
+    await act(async () => vi.advanceTimersByTimeAsync(2200));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
   it("does not start before gesture; rejected play is visible and retry works", async () => {
     await render(); expect(play).not.toHaveBeenCalled();
     play.mockRejectedValueOnce(new Error("blocked")); await autoStart();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("blocked");
     expect(debug().gameStarted).toBe(false);
-    await click("재생 다시 시도"); expect(debug().gameStarted).toBe(true); expect(debug().paused).toBe(false);
+    await click("재생 다시 시도");
+    expect(debug().gameStarted).toBe(false);
+    expect(debug().startupPhase).toBe("preparing");
+    await prepareMedia();
+    expect(debug().startupPhase).toBe("countdown");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2200); });
+    expect(debug().gameStarted).toBe(true); expect(debug().paused).toBe(false);
   });
   it("pause freezes judgement, releases Hold, clears stale keys and allows regrab", async () => {
     await render(); await autoStart(); await advance(2); await key("keydown", "f");
@@ -113,12 +153,12 @@ describe("v4 asynchronous result persistence", () => {
   it("reports a finished run when library caching completes later", async () => {
     await render(); await autoStart(); await advance(10);
     const onResult = vi.fn().mockResolvedValue(undefined);
-    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" requireStartGesture onResult={onResult} />));
+    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" onResult={onResult} />));
     expect(onResult).toHaveBeenCalledTimes(1);
   });
   it("shows save failure and retries without replaying", async () => {
     const onResult = vi.fn().mockRejectedValueOnce(new Error("QuotaExceeded")).mockResolvedValueOnce(undefined);
-    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" requireStartGesture onResult={onResult} />));
+    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" onResult={onResult} />));
     await autoStart(); await advance(10);
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("QuotaExceeded");
     await click("기록 저장 다시 시도"); expect(onResult).toHaveBeenCalledTimes(2);
@@ -127,11 +167,11 @@ describe("v4 asynchronous result persistence", () => {
   it("does not attach old asynchronous achievements after restart", async () => {
     let complete!: (value: { clearType: "PERFECT_COMBO"; newHighScore: boolean }) => void;
     const onResult = vi.fn(() => new Promise(resolve => { complete = resolve; }));
-    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" requireStartGesture onResult={onResult as never} />));
+    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaKind="video" onResult={onResult as never} />));
     await autoStart(); await advance(10);
     // v4.75 waits for the actual media end and 600ms transition, not the final note.
     await act(async () => container.querySelector('video')!.dispatchEvent(new Event('ended')));
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 650)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(650); });
     await click("RETRY");
     await act(async () => complete({ clearType: "PERFECT_COMBO", newHighScore: true }));
     expect(container.textContent).not.toContain("NEW HIGH SCORE"); expect(debug().gameStarted).toBe(false);
@@ -183,7 +223,7 @@ describe("hotfix bounded media recovery", () => {
     expect(HTMLMediaElement.prototype.load).toHaveBeenCalledTimes(1); expect(play).toHaveBeenCalledTimes(1);
     expect(debug().paused).toBe(true);
   });
-  it("stalled timer does nothing after pause or before START", async () => {
+  it("stalled timer does nothing after pause or before gameplay begins", async () => {
     vi.useFakeTimers();
     try {
       await render(); await dispatch("waiting"); await act(async () => vi.advanceTimersByTime(3001));
@@ -264,7 +304,7 @@ describe("v4.75 independent Result lifecycle", () => {
     vi.useFakeTimers();
     try {
       const save = vi.fn().mockResolvedValue(undefined);
-      await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" requireStartGesture onResult={save}/>));
+      await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" onResult={save}/>));
       await autoStart(); await endSong();
       expect(save).toHaveBeenCalledTimes(1);
       expect(debug().state.totalJudged).toBe(4);
@@ -276,7 +316,7 @@ describe("v4.75 independent Result lifecycle", () => {
   });
   it("applies persisted visual/audio settings without changing judgement", async () => {
     const { DEFAULT_PREFERENCES } = await import('../settings/preferences');
-    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" requireStartGesture mediaMuted={false}
+    await act(async () => root.render(<GameScreen chart={chart} mediaUrl="/local" mediaMuted={false}
       preferences={{ ...DEFAULT_PREFERENCES, combo: false, judgementText: false, fastSlow: false, backgroundVideo: false, effects: 'low' }}
       audioSettings={{ masterVolume: .5, musicVolume: .4, sfxVolume: 0, sfxEnabled: false }}/>));
     expect(container.querySelector('video')!.volume).toBeCloseTo(.2);

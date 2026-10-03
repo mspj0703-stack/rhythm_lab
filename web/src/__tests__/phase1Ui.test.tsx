@@ -55,7 +55,7 @@ it('reads clipboard only on Paste, requests preview only on Load, and generates 
   await click('URL 불러오기');expect(fetcher.mock.calls[0][0]).toBe('/api/youtube-preview');
   expect(container.querySelector('.video-preview')!.textContent).toContain('2:05 · Artist');
   expect(container.querySelector('.video-preview img')!.getAttribute('src')).toContain('i.ytimg.com');
-  await click('채보 만들기');expect(fetcher.mock.calls[1][0]).toBe('/api/analyze-youtube');expect(complete).toHaveBeenCalledWith(payload);
+  await click('채보 만들기');expect(fetcher.mock.calls[1][0]).toBe('/api/analyze-youtube');expect(complete).toHaveBeenCalledWith({ ...payload, originalThumbnailUrl: 'https://i.ytimg.com/vi/id/hqdefault.jpg' });
 });
 it('clears stale preview when the URL changes',async()=>{
   await act(async()=>root.render(<YouTubeEntry onComplete={()=>{}}/>));

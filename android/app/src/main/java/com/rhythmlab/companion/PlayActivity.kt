@@ -14,10 +14,13 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import android.webkit.WebSettings
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import android.view.View
 import java.io.File
 import java.io.ByteArrayInputStream
 import java.io.FileInputStream
@@ -31,21 +34,31 @@ class PlayActivity : AppCompatActivity() {
     private lateinit var store: SavedSongStore
     private lateinit var songId: String
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private var expectedWebVersion: String = ""
+    private var expectedBuild: Long = 0
+    private var versionRetryUsed = false
     private val coverPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null || !::webView.isInitialized) return@registerForActivityResult
         try {
-            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
-            val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@registerForActivityResult
+            val mime = contentResolver.getType(uri)?.lowercase().orEmpty()
+            val allowed = setOf("image/jpeg", "image/png", "image/webp")
+            if (mime.isNotBlank() && mime !in allowed) error("지원하지 않는 이미지 형식입니다.")
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytesLimited(12 * 1024 * 1024) }
+                ?: error("이미지를 읽을 수 없습니다.")
+            val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("이미지를 해석할 수 없습니다.")
             val scale = minOf(1f, 960f / maxOf(source.width, source.height).toFloat())
             val resized = if (scale < 1f) Bitmap.createScaledBitmap(source, maxOf(1, (source.width * scale).toInt()), maxOf(1, (source.height * scale).toInt()), true) else source
             val out = ByteArrayOutputStream()
-            resized.compress(Bitmap.CompressFormat.JPEG, 86, out)
+            check(resized.compress(Bitmap.CompressFormat.JPEG, 86, out)) { "이미지를 저장할 수 없습니다." }
             if (resized !== source) resized.recycle()
             source.recycle()
             val dataUrl = "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
             val quoted = JSONObject.quote(dataUrl)
             webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('beatdash:native-cover',{detail:$quoted}));", null)
-        } catch (_: Exception) { /* selection failure is non-destructive */ }
+        } catch (error: Exception) {
+            val quoted = JSONObject.quote(error.message ?: "커버 이미지를 처리할 수 없습니다.")
+            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('beatdash:native-cover-error',{detail:$quoted}));", null)
+        }
     }
     private inner class ArtworkBridge {
         @JavascriptInterface fun pickCover() { runOnUiThread { coverPicker.launch("image/*") } }
@@ -75,6 +88,8 @@ class PlayActivity : AppCompatActivity() {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.mediaPlaybackRequiresUserGesture = false
+        webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+        webView.visibility = View.INVISIBLE
         webView.settings.allowFileAccess = false
         webView.addJavascriptInterface(ArtworkBridge(), "BeatdashArtwork")
         webView.webChromeClient = object : WebChromeClient() {
@@ -92,11 +107,44 @@ class PlayActivity : AppCompatActivity() {
                 return true
             }
         }
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        expectedWebVersion = packageInfo.versionName.orEmpty()
+        expectedBuild = if (android.os.Build.VERSION.SDK_INT >= 28) packageInfo.longVersionCode else packageInfo.versionCode.toLong()
+
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!request.isForMainFrame || request.url.host == Uri.parse(RhythmApi.WEB_BASE).host) return false
                 startActivity(Intent(Intent.ACTION_VIEW, request.url))
                 return true
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                super.onPageFinished(view, url)
+                val uri = Uri.parse(url)
+                if (uri.host != Uri.parse(RhythmApi.WEB_BASE).host) return
+                view.evaluateJavascript("String(window.__BEATDASH_VERSION__ || '')") { raw ->
+                    val actual = raw.orEmpty().trim().removeSurrounding("\"")
+                    if (actual == expectedWebVersion) {
+                        versionRetryUsed = false
+                        view.visibility = View.VISIBLE
+                        return@evaluateJavascript
+                    }
+                    if (!versionRetryUsed) {
+                        versionRetryUsed = true
+                        view.clearCache(true)
+                        val refreshed = uri.buildUpon().appendQueryParameter("webRefresh", expectedBuild.toString()).build().toString()
+                        view.loadUrl(refreshed)
+                        return@evaluateJavascript
+                    }
+                    view.stopLoading()
+                    view.visibility = View.INVISIBLE
+                    AlertDialog.Builder(this@PlayActivity)
+                        .setTitle("앱 화면 업데이트 필요")
+                        .setMessage("APK는 ${expectedWebVersion}인데 Web 화면은 ${actual.ifBlank { "확인 불가" }}입니다. 오래된 화면으로 플레이하지 않도록 실행을 중단했습니다. Web 배포 후 다시 열어 주세요.")
+                        .setCancelable(false)
+                        .setPositiveButton("닫기") { _, _ -> finish() }
+                        .show()
+                }
             }
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -117,12 +165,22 @@ class PlayActivity : AppCompatActivity() {
         }
 
         val url = if (song != null) "${RhythmApi.WEB_BASE}/?session=${Uri.encode(song.id)}&saved=1" else "${RhythmApi.WEB_BASE}/?view=$entryView"
-        val packageInfo = packageManager.getPackageInfo(packageName, 0)
-        val build = if (android.os.Build.VERSION.SDK_INT >= 28) packageInfo.longVersionCode else packageInfo.versionCode.toLong()
-        webView.loadUrl("$url&nativeVersion=${Uri.encode(packageInfo.versionName.orEmpty())}&nativeBuild=$build")
+        webView.loadUrl("$url&nativeVersion=${Uri.encode(expectedWebVersion)}&nativeBuild=$expectedBuild&webRefresh=$expectedBuild")
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { finish() }
         })
+    }
+
+    private fun InputStream.readBytesLimited(limit: Int): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val count = read(buffer)
+            if (count < 0) break
+            check(output.size() + count <= limit) { "이미지 파일이 너무 큽니다." }
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
     }
 
     private fun fileResponse(file: File, mime: String, request: WebResourceRequest): WebResourceResponse {
@@ -172,7 +230,10 @@ class PlayActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::webView.isInitialized) webView.onResume()
+        if (::webView.isInitialized) {
+            webView.onResume()
+            webView.evaluateJavascript("window.dispatchEvent(new Event('beatdash:resume'));", null)
+        }
     }
 
     override fun onDestroy() {
