@@ -13,8 +13,15 @@ require(versionCore.size == 3) { "VERSION must start with major.minor.patch" }
 val versionMajor = versionCore[0].toInt()
 val versionMinor = versionCore[1].toInt()
 val versionPatch = versionCore[2].toInt()
+require(versionMinor in 0..99) { "VERSION minor component must be between 0 and 99" }
+require(versionPatch in 0..99) { "VERSION patch component must be between 0 and 99" }
+
+// BEATDASH v4 release names historically use decimal-style milestones (4.75 -> 4.8).
+// Right-pad a one-digit minor component for Android's monotonically increasing versionCode
+// so 4.8 maps after 4.75 instead of being treated as 408 < 475.
+val versionMinorForCode = if (versionMinor < 10) versionMinor * 10 else versionMinor
 val buildSequence = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1) % 10000
-val beatdashVersionCode = versionMajor * 100_000_000 + versionMinor * 1_000_000 + versionPatch * 10_000 + buildSequence
+val beatdashVersionCode = versionMajor * 100_000_000 + versionMinorForCode * 1_000_000 + versionPatch * 10_000 + buildSequence
 
 
 android {
