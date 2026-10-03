@@ -77,10 +77,20 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
       const data = (event as CustomEvent<string>).detail;
       if (!data?.startsWith("data:image/")) return;
       setCoverBusy(true);
+      setError(null);
       void updateSongCustomCover(bundle.song.id, data).then(onChanged).catch((e: Error) => setError(e.message)).finally(() => setCoverBusy(false));
     };
+    const onNativeCoverError = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail;
+      setCoverBusy(false);
+      setError(message || "커버 이미지를 처리할 수 없습니다.");
+    };
     window.addEventListener("beatdash:native-cover", onNativeCover);
-    return () => window.removeEventListener("beatdash:native-cover", onNativeCover);
+    window.addEventListener("beatdash:native-cover-error", onNativeCoverError);
+    return () => {
+      window.removeEventListener("beatdash:native-cover", onNativeCover);
+      window.removeEventListener("beatdash:native-cover-error", onNativeCoverError);
+    };
   }, [bundle.song.id, onChanged]);
 
   const record = selected ? bests[selected.difficulty] : null;

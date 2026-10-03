@@ -1,0 +1,49 @@
+Baseline: BEATDASH-v4.75-RC-integrated-phase3-source.zip
+Target: BEATDASH v4.8.0-rc.1
+
+MODIFY .github/workflows/build-android.yml
+  - Trigger Android build on web/VERSION changes and verify APK versionName matches the SSoT.
+MODIFY android/app/src/main/java/com/rhythmlab/companion/MainActivity.kt
+  - Native home visual hierarchy, responsive width, queue cards/status badges, saved-song presentation.
+MODIFY android/app/src/main/java/com/rhythmlab/companion/PlayActivity.kt
+  - Stale production-Web version gate, no-cache loading, lifecycle resume event, native cover error path.
+ADD android/app/src/main/res/drawable/bg_button_ghost.xml
+ADD android/app/src/main/res/drawable/bg_button_primary.xml
+ADD android/app/src/main/res/drawable/bg_button_secondary.xml
+ADD android/app/src/main/res/drawable/bg_card.xml
+ADD android/app/src/main/res/drawable/bg_card_soft.xml
+ADD android/app/src/main/res/drawable/bg_input.xml
+  - Native dark/purple card/input/button resources.
+MODIFY android/app/src/main/res/layout/activity_main.xml
+  - Card-based responsive Android home layout.
+ADD android/app/src/main/res/layout/spinner_dropdown_item.xml
+ADD android/app/src/main/res/layout/spinner_item.xml
+  - Spinner presentation matching the redesigned home.
+MODIFY scripts/tests/test_version_source.py
+  - SSoT/version gate and Android workflow checks.
+ADD scripts/tests/test_v48_android_source.py
+  - Android UI/queue/version/artwork/data/feedback source regressions.
+ADD scripts/tests/test_v48_start_flow_source.py
+  - START removal, preparation/countdown/lifecycle/note-speed source contracts.
+MODIFY web/BUILD_REVISION
+  - RC local build marker.
+MODIFY web/VERSION
+  - 4.8.0-rc.1 release source.
+ADD web/analyzer/tests/test_v48_chart_ai_pipeline.py
+  - Representative Chart AI v2 pipeline/seed/density/schema regression fixtures.
+MODIFY web/src/App.tsx
+  - Remove obsolete requireStartGesture caller contract.
+MODIFY web/src/__tests__/gameState.test.ts
+  - Multi-lane/multi-touch and Perfect Streak regression coverage.
+MODIFY web/src/__tests__/mediaLifecycle.test.tsx
+  - Media-ready countdown, no START action, no early Miss, background race coverage.
+MODIFY web/src/components/GameScreen.tsx
+  - Explicit preparing/countdown/playing startup state machine and lifecycle/error race hardening.
+MODIFY web/src/components/v4/SongDetailScreen.tsx
+  - Surface native artwork-picker processing errors in the actual UI.
+MODIFY web/src/main.tsx
+  - Expose Web release version to Android stale-version gate from web/VERSION.
+ADD docs/V4_8_IMPLEMENTATION_REPORT.md
+ADD docs/V4_8_TEST_REPORT.md
+ADD docs/V4_8_ANDROID_DEVICE_CHECKLIST.md
+ADD docs/V4_8_CHANGED_FILES.txt

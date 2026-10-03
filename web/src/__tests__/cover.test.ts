@@ -17,6 +17,9 @@ it("closes bitmap even if canvas encoding fails",async()=>{vi.mocked(HTMLCanvasE
 
 it("persists a remote original thumbnail as image bytes instead of its URL", async () => {
   const { persistOriginalThumbnail } = await import("../library/artwork");
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["img"], { type: "image/jpeg" }), { status: 200 })));
+  vi.stubGlobal("fetch", vi.fn(async () => ({
+    ok: true,
+    blob: async () => new Blob(["img"], { type: "image/jpeg" }),
+  }) as Response));
   expect(await persistOriginalThumbnail("https://example.test/thumb.jpg")).toBe("data:image/jpeg;size=960x540");
 });

@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - 'android/**'
+      - 'web/VERSION'
       - '.github/workflows/build-android.yml'
 
 jobs:
@@ -50,7 +51,13 @@ jobs:
         run: |
           APK=android/app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:'
+          EXPECTED_VERSION="$(tr -d '\r\n' < web/VERSION)"
+          BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:')"
+          echo "$BADGING"
+          echo "$BADGING" | grep -F "versionName='$EXPECTED_VERSION'" >/dev/null || {
+            echo "APK versionName does not match web/VERSION ($EXPECTED_VERSION)"
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: beatdash-android-signed
