@@ -1,5 +1,6 @@
 package com.rhythmlab.companion
 
+import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
 import android.text.Editable
@@ -13,8 +14,15 @@ import java.util.concurrent.TimeUnit
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.app.AlertDialog
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -35,6 +43,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
     private lateinit var savedSongs: LinearLayout
+    private lateinit var batchUrlInput: EditText
+    private lateinit var batchAddButton: Button
+    private lateinit var jobQueue: LinearLayout
+    private lateinit var queueSummary: TextView
+    private lateinit var contentContainer: LinearLayout
     private lateinit var pasteButton: Button
     private lateinit var previewButton: Button
     private lateinit var previewCard: LinearLayout
@@ -46,6 +59,14 @@ class MainActivity : AppCompatActivity() {
     private var previewGeneration = 0
     private val thumbnailClient = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build()
     private lateinit var store: SavedSongStore
+    private lateinit var jobStore: ChartJobStore
+    private val handler = Handler(Looper.getMainLooper())
+    private val queueRefresh = object : Runnable {
+        override fun run() {
+            if (::jobQueue.isInitialized) refreshJobs()
+            handler.postDelayed(this, 1000)
+        }
+    }
 
     private val executor = Executors.newSingleThreadExecutor()
     private var lastSongId: String? = null
@@ -54,6 +75,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         store = SavedSongStore(this)
+        jobStore = ChartJobStore(this)
 
         urlInput = findViewById(R.id.urlInput)
         difficultySpinner = findViewById(R.id.difficultySpinner)
@@ -63,6 +85,12 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         statusText = findViewById(R.id.statusText)
         savedSongs = findViewById(R.id.savedSongs)
+        batchUrlInput = findViewById(R.id.batchUrlInput)
+        batchAddButton = findViewById(R.id.batchAddButton)
+        jobQueue = findViewById(R.id.jobQueue)
+        queueSummary = findViewById(R.id.queueSummary)
+        contentContainer = findViewById(R.id.contentContainer)
+        applyResponsiveContentWidth()
 
         pasteButton = findViewById(R.id.pasteButton)
         previewButton = findViewById(R.id.previewButton)
@@ -99,22 +127,31 @@ class MainActivity : AppCompatActivity() {
         }
 
         val difficulties = listOf("Easy", "Normal", "Hard", "Expert")
-        difficultySpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            difficulties,
-        )
+        difficultySpinner.adapter = ArrayAdapter(this, R.layout.spinner_item, difficulties).also {
+            it.setDropDownViewResource(R.layout.spinner_dropdown_item)
+        }
         difficultySpinner.setSelection(2)
 
         readSharedUrl(intent)?.let(urlInput::setText)
         startButton.setOnClickListener { startPipeline() }
+        batchAddButton.setOnClickListener { enqueueBatch() }
         openWebButton.setOnClickListener { lastSongId?.let(::openSong) }
+        jobStore.recoverInterrupted()
         refreshSongs()
+        refreshJobs()
+        if (jobStore.nextRunnable() != null) ChartJobService.start(this)
     }
 
     override fun onResume() {
         super.onResume()
         if (::savedSongs.isInitialized) refreshSongs()
+        handler.removeCallbacks(queueRefresh)
+        handler.post(queueRefresh)
+    }
+
+    override fun onPause() {
+        handler.removeCallbacks(queueRefresh)
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -125,6 +162,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         previewGeneration++
+        handler.removeCallbacks(queueRefresh)
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -200,61 +238,143 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startPipeline() {
-        if (busy) return
         val url = urlInput.text.toString().trim()
         if (previewUrl != url) { loadPreview(); return }
-        if (!isYoutubeUrl(url)) {
-            urlInput.error = "YouTube 링크를 입력해 주세요."
+        enqueueUrls(listOf(url))
+    }
+
+    private fun enqueueBatch() {
+        val urls = URL_REGEX.findAll(batchUrlInput.text.toString()).map { it.value.trimEnd('.', ',', ')', ']') }.distinct().toList()
+        if (urls.isEmpty()) {
+            batchUrlInput.error = "YouTube 링크를 하나 이상 입력해 주세요."
             return
         }
-        val videoId = extractVideoId(url)
-        if (videoId == null) {
-            urlInput.error = "영상 ID를 읽지 못했습니다."
-            return
-        }
+        enqueueUrls(urls)
+    }
+
+    private fun enqueueUrls(urls: List<String>) {
         val difficulty = difficultySpinner.selectedItem.toString().lowercase()
         val seed = seedInput.text.toString().toIntOrNull() ?: 42
-
-        setBusy(true)
-        statusText.text = "시작 중…"
-        openWebButton.visibility = View.GONE
-
-        executor.execute {
-            var audioFile: java.io.File? = null
-            var videoFile: java.io.File? = null
-            try {
-                val media = YoutubeEngine.extractMedia(this, url) { _, message ->
-                    ui {
-                        statusText.text = message
-                    }
-                }
-                audioFile = media.audio
-                videoFile = media.video
-
-                ui {
-                    statusText.text = "오디오 업로드 · BPM 분석 · 채보 생성 중…"
-                }
-                val result = RhythmApi.analyze(media.audio, difficulty, seed)
-                val song = store.save(result.analysis, media.audio, media.video, videoId, media.originalTitle, media.thumbnail)
-                lastSongId = song.id
-
-                ui {
-                    setBusy(false)
-                    statusText.text = "채보 저장 완료! 앱에서 플레이하는 중…"
-                    openWebButton.visibility = View.VISIBLE
-                    refreshSongs()
-                    openSong(song.id)
-                }
-            } catch (_: Exception) {
-                ui {
-                    setBusy(false)
-                    statusText.text = "채보를 만들지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요."
-                }
-            } finally {
-                audioFile?.delete()
-                videoFile?.delete()
+        var added = 0
+        var duplicates = 0
+        var invalid = 0
+        for (url in urls) {
+            if (!isYoutubeUrl(url)) { invalid++; continue }
+            val videoId = extractVideoId(url)
+            if (videoId == null) { invalid++; continue }
+            val before = jobStore.list().firstOrNull {
+                it.videoId == videoId && it.difficulty == difficulty && it.seed == seed && it.status !in ChartJobStore.TERMINAL
             }
+            jobStore.enqueue(url, difficulty, seed, videoId)
+            if (before == null) added++ else duplicates++
         }
+        if (added > 0) {
+            requestNotificationPermissionIfNeeded()
+            ChartJobService.start(this)
+            batchUrlInput.text?.clear()
+            statusText.text = buildString {
+                append("${added}곡을 대기열에 추가했습니다.")
+                if (duplicates > 0) append(" 중복 ${duplicates}개 제외.")
+                if (invalid > 0) append(" 잘못된 링크 ${invalid}개 제외.")
+            }
+        } else {
+            statusText.text = if (duplicates > 0) "같은 영상·난이도·seed 작업이 이미 대기열에 있습니다." else "추가할 수 있는 YouTube 링크가 없습니다."
+        }
+        refreshJobs()
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4752)
+        }
+    }
+
+    private fun refreshJobs() {
+        if (!::jobQueue.isInitialized) return
+        jobQueue.removeAllViews()
+        val allJobs = jobStore.list().sortedByDescending { it.createdAt }
+        val jobs = allJobs.take(20)
+        val activeCount = allJobs.count { it.status !in ChartJobStore.TERMINAL && it.status != ChartJobStore.NEEDS_RETRY }
+        queueSummary.text = if (allJobs.isEmpty()) "작업 없음" else "작업 ${allJobs.size}개 · 진행 ${activeCount}개"
+        if (jobs.isEmpty()) {
+            jobQueue.addView(TextView(this).apply {
+                text = "대기 중인 작업이 없습니다."
+                setTextColor(Color.parseColor("#8D859A"))
+                textSize = 13f
+                setPadding(0, dp(8), 0, dp(2))
+            })
+            return
+        }
+        for ((index, job) in jobs.withIndex()) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(13), dp(14), dp(13))
+                background = roundedPanel("#100E16", "#2D2638", 16f)
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    if (index > 0) topMargin = dp(9)
+                }
+            }
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val title = job.title ?: "YouTube · ${job.videoId}"
+            header.addView(TextView(this).apply {
+                text = title
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            header.addView(statusBadge(job.status))
+            row.addView(header)
+            row.addView(TextView(this).apply {
+                text = "${job.difficulty.uppercase()} · seed ${job.seed}"
+                setTextColor(Color.parseColor("#A99CB8"))
+                textSize = 11f
+                setPadding(0, dp(7), 0, 0)
+            })
+            row.addView(TextView(this).apply {
+                text = job.message
+                setTextColor(Color.parseColor("#C6BFCE"))
+                textSize = 12f
+                setPadding(0, dp(5), 0, 0)
+            })
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END
+                setPadding(0, dp(8), 0, 0)
+            }
+            when (job.status) {
+                ChartJobStore.COMPLETED -> job.songId?.let { songId ->
+                    actions.addView(queueActionButton("플레이", primary = true) { openSong(songId) })
+                }
+                ChartJobStore.FAILED, ChartJobStore.NEEDS_RETRY, ChartJobStore.CANCELED -> actions.addView(
+                    queueActionButton("재시도", primary = true) { ChartJobService.retry(this@MainActivity, job.id); refreshJobs() }
+                )
+                else -> actions.addView(
+                    queueActionButton("취소", primary = false) { ChartJobService.cancel(this@MainActivity, job.id); refreshJobs() }
+                )
+            }
+            if (actions.childCount > 0) row.addView(actions)
+            jobQueue.addView(row)
+        }
+        allJobs.firstOrNull { it.status == ChartJobStore.COMPLETED && it.songId != null }?.songId?.let { lastSongId = it }
+        refreshSongs()
+    }
+
+    private fun jobStatusLabel(status: String) = when (status) {
+        ChartJobStore.QUEUED -> "대기"
+        ChartJobStore.PREVIEWING -> "영상 확인"
+        ChartJobStore.PREPARING -> "영상·음원 준비"
+        ChartJobStore.ANALYZING -> "업로드·분석"
+        ChartJobStore.SAVING -> "저장"
+        ChartJobStore.COMPLETED -> "완료"
+        ChartJobStore.FAILED -> "실패"
+        ChartJobStore.CANCELED -> "취소"
+        ChartJobStore.NEEDS_RETRY -> "확인 필요"
+        else -> status
     }
 
     private fun setBusy(busy: Boolean) {
@@ -267,6 +387,8 @@ class MainActivity : AppCompatActivity() {
         urlInput.isEnabled = !busy
         difficultySpinner.isEnabled = !busy
         seedInput.isEnabled = !busy
+        batchAddButton.isEnabled = true
+        batchUrlInput.isEnabled = true
     }
 
     private fun openSong(id: String) {
@@ -278,14 +400,21 @@ class MainActivity : AppCompatActivity() {
         val songs = store.list()
         if (songs.isEmpty()) {
             savedSongs.addView(TextView(this).apply {
-                text = "아직 저장한 곡이 없어요."
-                setTextColor(Color.LTGRAY)
+                text = "아직 저장한 곡이 없어요. Queue에서 곡을 만들면 여기에 표시됩니다."
+                setTextColor(Color.parseColor("#8D859A"))
+                textSize = 13f
+                setPadding(0, dp(8), 0, dp(2))
             })
         }
-        for (song in songs) {
+        for ((index, song) in songs.withIndex()) {
             val button = Button(this).apply {
-                text = "${song.title} · ${song.difficulty}"
+                text = "${song.title}\n${song.difficulty.uppercase()}"
                 isAllCaps = false
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                background = getDrawable(R.drawable.bg_button_secondary)
+                setPadding(dp(14), dp(8), dp(14), dp(8))
                 setOnClickListener { openSong(song.id) }
                 setOnLongClickListener {
                     AlertDialog.Builder(this@MainActivity)
@@ -296,8 +425,55 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
             }
-            savedSongs.addView(button)
+            savedSongs.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(62)).apply {
+                if (index > 0) topMargin = dp(8)
+            })
         }
+    }
+
+    private fun applyResponsiveContentWidth() {
+        val displayWidth = resources.displayMetrics.widthPixels
+        val target = minOf(displayWidth - dp(24), dp(700))
+        val params = contentContainer.layoutParams as FrameLayout.LayoutParams
+        params.width = target.coerceAtLeast(dp(280))
+        params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        contentContainer.layoutParams = params
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun roundedPanel(fill: String, stroke: String, radiusDp: Float) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        setColor(Color.parseColor(fill))
+        cornerRadius = radiusDp * resources.displayMetrics.density
+        setStroke(dp(1), Color.parseColor(stroke))
+    }
+
+    private fun statusBadge(status: String) = TextView(this).apply {
+        text = jobStatusLabel(status).uppercase()
+        textSize = 10f
+        setTypeface(typeface, android.graphics.Typeface.BOLD)
+        val (fill, textColor) = when (status) {
+            ChartJobStore.COMPLETED -> "#18342A" to "#7EE2B8"
+            ChartJobStore.FAILED -> "#3A1D28" to "#FF9DAF"
+            ChartJobStore.CANCELED -> "#25212B" to "#AFA7BA"
+            ChartJobStore.NEEDS_RETRY -> "#3A2D16" to "#FFD27A"
+            ChartJobStore.QUEUED -> "#211B31" to "#BCAAF8"
+            else -> "#291E40" to "#C7B1FF"
+        }
+        background = roundedPanel(fill, fill, 20f)
+        setTextColor(Color.parseColor(textColor))
+        setPadding(dp(9), dp(5), dp(9), dp(5))
+    }
+
+    private fun queueActionButton(label: String, primary: Boolean, action: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        textSize = 12f
+        setTextColor(Color.WHITE)
+        background = getDrawable(if (primary) R.drawable.bg_button_primary else R.drawable.bg_button_ghost)
+        setOnClickListener { action() }
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)).apply { marginStart = dp(6) }
     }
 
     private fun readSharedUrl(intent: Intent?): String? {

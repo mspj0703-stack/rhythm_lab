@@ -6,6 +6,8 @@ on:
     branches: [ main ]
     paths:
       - 'android/**'
+      - 'web/VERSION'
+      - 'web/SERVICE_URL'
       - '.github/workflows/build-android.yml'
 
 jobs:
@@ -17,16 +19,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v4
       - name: Install Android SDK
-        shell: bash
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
-          fi
-          test -n "$SDKMANAGER" || { echo "sdkmanager not found"; exit 1; }
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" </dev/null
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -57,7 +52,13 @@ jobs:
         run: |
           APK=android/app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:'
+          EXPECTED_VERSION="$(tr -d '\r\n' < web/VERSION)"
+          BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -m1 '^package:')"
+          echo "$BADGING"
+          echo "$BADGING" | grep -F "versionName='$EXPECTED_VERSION'" >/dev/null || {
+            echo "APK versionName does not match web/VERSION ($EXPECTED_VERSION)"
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: beatdash-android-signed

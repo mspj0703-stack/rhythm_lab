@@ -1,0 +1,610 @@
+
+> rhythm-core@0.0.0-private test
+> vitest run --run --reporter=verbose
+
+
+ RUN  v5.0.1 /workspaces/rhythm_lab/web
+
+ × src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > leaving gameplay stops the media element 176ms
+   → expected "vi.fn()" to be called at least once
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > has no redundant START action and waits for media preparation before countdown 30ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > does not advance judgement or create Miss during countdown 32ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > backgrounding during countdown cancels delayed start until an explicit resume 35ms
+ × src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > does not start before gesture; rejected play is visible and retry works 34ms
+   → expected false to be true // Object.is equality
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > pause freezes judgement, releases Hold, clears stale keys and allows regrab 47ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > Hold cannot complete hands-free after pause 37ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > restart resets score, media time, gesture gate and stale inputs 53ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > legacy audio-only playback uses audio clock with no iframe or MV settings 45ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > MV off keeps the same audible video element and does not pause it 27ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > native background event pauses gameplay and media 22ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > offset 80ms aligns actual input to the media clock 25ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > offset -60ms aligns actual input to the media clock 24ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > offset 250ms aligns actual input to the media clock 22ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > Flick lane+Space input works and prevents default scrolling 26ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > v4 asynchronous result persistence > reports a finished run when library caching completes later 23ms
+ ✓ src/__tests__/mediaLifecycle.test.tsx > v4 asynchronous result persistence > shows save failure and retries without replaying 25ms
+ × src/__tests__/mediaLifecycle.test.tsx > v4 asynchronous result persistence > does not attach old asynchronous achievements after restart 5004ms
+   → Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > preload errors do not bypass the automatic countdown 4ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > freezes judgement during reload and restores position after metadata/seek 2ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > background pause cancels pending recovery; explicit resume retains checkpoint 2ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > restart cancels recovery and never restores the old position 2ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > leaving gameplay removes recovery listeners and prevents later play 1ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > a persistent media error stops at one failed load without an error loop 1ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > stalled timer does nothing after pause or before gameplay begins 1ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > automatically recovers stalled playback only after the 3 second threshold 2ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > limits repeated automatic recoveries to two per run 2ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > recovery timeout leaves a visible retry action and paused judgement 2ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > a hung play promise becomes a retryable error instead of freezing recovery forever 2ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > v4.75 independent Result lifecycle > keeps the outro playing, transitions after media end and removes every playfield/input/media node 1ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > v4.75 independent Result lifecycle > end event resolves remaining notes, saves once and blocks an orphan click 2ms
+   → Cannot read properties of null (reading 'dispatchEvent')
+ × src/__tests__/mediaLifecycle.test.tsx > v4.75 independent Result lifecycle > applies persisted visual/audio settings without changing judgement 1ms
+   → Cannot read properties of null (reading 'volume')
+ × src/__tests__/phase1Ui.test.tsx > reads clipboard only on Paste, requests preview only on Load, and generates only on CTA 77ms
+   → expected "vi.fn()" to be called with arguments: [ { …(7) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+@@ -17,10 +17,11 @@
+      },
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mediaKind": "audio",
+      "mediaUrl": "/media",
+      "originalName": "original.wav",
++     "originalThumbnailUrl": "https://i.ytimg.com/vi/id/hqdefault.jpg",
+      "originalTitle": "Original Song",
+      "report": {
+        "bpm": 120,
+        "bpmConfidence": 1,
+        "difficulty": "hard",
+
+
+Number of calls: 1
+
+ ✓ src/__tests__/phase1Ui.test.tsx > clears stale preview when the URL changes 14ms
+stderr | src/__tests__/phase1Ui.test.tsx > completes Home → preview → analysis → play with the real Library cache
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/__tests__/phase1Ui.test.tsx > never displays backend exception strings on preview failure 11ms
+ ✓ src/__tests__/phase1Ui.test.tsx > shows only a stage while generating and aborts delivery after leaving Home 16ms
+ ✓ src/__tests__/phase1Ui.test.tsx > completes Home → preview → analysis → play with the real Library cache 126ms
+ ✓ src/__tests__/phase1Ui.test.tsx > settings reset through the UI preserves library, chart, records, custom cover and song offset 70ms
+ ✓ src/__tests__/phase1Ui.test.tsx > visual and judgement toggles survive a fresh App mount 48ms
+ ✓ src/__tests__/phase1Ui.test.tsx > supports Android library/settings entry without requiring a song session 18ms
+ ✓ src/__tests__/cover.test.ts > converts image/jpeg at max 960 edge and closes bitmap 6ms
+ ✓ src/__tests__/cover.test.ts > converts image/png at max 960 edge and closes bitmap 1ms
+ ✓ src/__tests__/cover.test.ts > converts image/webp at max 960 edge and closes bitmap 1ms
+ ✓ src/__tests__/cover.test.ts > accepts an Android image filename with empty MIME 1ms
+ ✓ src/__tests__/cover.test.ts > rejects non-image input 2ms
+ ✓ src/__tests__/cover.test.ts > closes bitmap even if canvas encoding fails 1ms
+ × src/__tests__/cover.test.ts > persists a remote original thumbnail as image bytes instead of its URL 9ms
+   → expected undefined to be 'data:image/jpeg;size=960x540' // Object.is equality
+stderr | src/__tests__/sfxPhase3.test.ts > initializes WebAudio and permits overlapping hit voices
+[vitest] The vi.fn() mock did not use 'function' or 'class' in its implementation, see https://vitest.dev/api/vi#vi-spyon for examples.
+
+ × src/__tests__/sfxPhase3.test.ts > initializes WebAudio and permits overlapping hit voices 7ms
+   → () => ctx is not a constructor
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > 픽스처가 16개(4 샘플 x 4 난이도) 존재한다 4ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.easy.json: v0.1 parseChart로 로드된다 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.easy.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 4ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.easy.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 3ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.expert.json: v0.1 parseChart로 로드된다 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.expert.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 10ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.expert.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 4ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.hard.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.hard.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 6ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.hard.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 5ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.normal.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.normal.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 4ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > accent.normal.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 17ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.easy.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.easy.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.easy.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.expert.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.expert.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 2ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.expert.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.hard.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.hard.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 2ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.hard.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.normal.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.normal.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 2ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > bands.normal.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.easy.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.easy.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 2ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.easy.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.expert.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.expert.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 4ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.expert.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.hard.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.hard.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 4ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.hard.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.normal.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.normal.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 2ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > fast_180.normal.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.easy.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.easy.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.easy.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.expert.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.expert.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.expert.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.hard.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.hard.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.hard.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.normal.json: v0.1 parseChart로 로드된다 0ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.normal.json: 시간 오름차순, 레인 0~3, 같은 레인+시각 중복 없음 1ms
+ ✓ src/__tests__/generatedCharts.test.ts > v0.2 생성 채보 호환성 > kick_120.normal.json: 게임 엔진에서 완벽하게 끝까지 플레이 가능 (전부 Perfect, finished) 0ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > upgrades a real v1 database and retains blobs, charts, records, edited title and offsets 18ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > preserves immutable source title across display rename, reload and chart regeneration 4ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > preserves original thumbnail and keeps custom cover separate 4ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > does not merge different bytes with the same filename, duration and BPM 4ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > deduplicates the same bytes despite renaming and preserves edited title and offset 3ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > migrates matching legacy fingerprint without losing version-1 records 4ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > keeps records on identical reimport, separates records on changed chart 7ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > adds difficulty to explicit song despite changed metadata, keeping original media 2ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > concurrent saves create one song and one chart 2ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > does not claim persistent save when media fetch fails 1ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > rolls back both stores on quota/write failure and allows a later retry 4ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > rejects an empty media file 0ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > native saved media uses stable local endpoint without duplicating large Blob 1ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > deletes song, charts and all record versions atomically and rejects orphan writes 3ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > preserves v3 note speed and device offset keys during library initialization 2ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > combines device and song offsets and clamps both limits 0ms
+ ✓ src/__tests__/libraryDb.test.ts > v4 persisted Library regression > guards corrupt audio settings against NaN volume and nonboolean enabled flag 0ms
+ ✓ src/__tests__/gameState.test.ts > Tap 판정 및 콤보/정확도 > 10. 연속 Perfect는 콤보가 계속 증가하고, Miss에서 콤보가 초기화된다 3ms
+ ✓ src/__tests__/gameState.test.ts > Tap 판정 및 콤보/정확도 > Perfect Streak는 Perfect에서만 이어지고 Great/Good에서 종료된다 1ms
+ ✓ src/__tests__/gameState.test.ts > Tap 판정 및 콤보/정확도 > 12. Accuracy 계산이 판정 가중치를 정확히 반영한다 0ms
+ ✓ src/__tests__/gameState.test.ts > Tap 판정 및 콤보/정확도 > 허공 입력(대상 노트 없음)은 상태를 바꾸지 않는다 0ms
+ ✓ src/__tests__/gameState.test.ts > Hold 판정 (시작/유지/조기이탈/완료) > 7. Hold 시작 성공 시 상태가 holding으로 바뀐다 0ms
+ ✓ src/__tests__/gameState.test.ts > Hold 판정 (시작/유지/조기이탈/완료) > 8. Hold 조기 이탈은 즉시 Miss가 아니라 100ms re-grab grace를 준다 1ms
+ ✓ src/__tests__/gameState.test.ts > Hold 판정 (시작/유지/조기이탈/완료) > grace 안에 다시 누르면 Hold가 복구된다 1ms
+ ✓ src/__tests__/gameState.test.ts > Hold 판정 (시작/유지/조기이탈/완료) > Hold tail 120ms 이내 조기 release는 정상 완료로 인정한다 0ms
+ ✓ src/__tests__/gameState.test.ts > Hold 판정 (시작/유지/조기이탈/완료) > 9. Hold 정상 완료 시 시작 판정 등급대로 콤보/점수가 반영된다 0ms
+ ✓ src/__tests__/gameState.test.ts > Hold 판정 (시작/유지/조기이탈/완료) > 키를 계속 누르고 있으면 tick()이 종료 시각에 자동으로 완료 처리한다 0ms
+ ✓ src/__tests__/gameState.test.ts > Flick 판정 > 10. Flick 노트가 정상적으로 판정된다 0ms
+ ✓ src/__tests__/gameState.test.ts > Flick 판정 > tap 시도로는 flick 노트가 판정되지 않는다 (타입이 다름) 0ms
+ ✓ src/__tests__/gameState.test.ts > v4.8 multi-lane regression > Tap + Tap을 같은 시각에 서로 다른 레인에서 독립 처리한다 1ms
+ ✓ src/__tests__/gameState.test.ts > v4.8 multi-lane regression > Tap + Hold 및 Hold + Hold 동시 입력이 서로를 소비하지 않는다 0ms
+ ✓ src/__tests__/gameState.test.ts > v4.8 multi-lane regression > Hold 유지 중 다른 레인의 Tap/Flick 판정이 Hold 상태를 깨지 않는다 0ms
+ ✓ src/__tests__/gameState.test.ts > 곡(영상) 종료 처리 (v0.2 회귀 수정) > 영상이 끝나 시간이 무한대로 정산되면 남은 pending 노트는 Miss, 게임은 finished 0ms
+ ✓ src/__tests__/gameState.test.ts > 곡(영상) 종료 처리 (v0.2 회귀 수정) > 마지막 노트 직후 영상이 끝나도(0.5초 여유 없음) finished가 된다 0ms
+ ✓ src/__tests__/gameState.test.ts > Gameplay Feel v2 feedback > Great/Good 입력의 signed diff와 lane/type을 feedback에 보존한다 0ms
+ ✓ src/__tests__/gameState.test.ts > Gameplay Feel v2 feedback > Hold 시작도 점수 반영 전 즉시 feedback을 만든다 0ms
+ ✓ src/__tests__/gameState.test.ts > Restart > 13. Restart 후 모든 상태가 초기화된다 0ms
+ ✓ src/__tests__/gameState.test.ts > 실제 채보 JSON 파싱 통합 > parseChart로 만든 채보로도 정상적으로 게임 상태를 만들 수 있다 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 1s / -35ms applies to Tap, Hold and Flick 3ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 1s / -75ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 1s / -120ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 1s / 35ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 1s / 75ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 1s / 120ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 10s / -35ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 10s / -75ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 10s / -120ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 10s / 35ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 10s / 75ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 10s / 120ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 479s / -35ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 479s / -75ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 479s / -120ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 479s / 35ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 479s / 75ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > 479s / 120ms applies to Tap, Hold and Flick 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > pending expires only beyond 120ms 0ms
+ ✓ src/__tests__/v3Regression.test.ts > v3 timing boundaries in actual seconds > hold release accepts 120ms and regrab accepts 100ms even after a frame at the boundary 0ms
+ ✓ src/__tests__/v3Regression.test.ts > perspective visibility and lane containment > Speed 1: horizon 1.6x, judge line, smooth forward movement 1ms
+ ✓ src/__tests__/v3Regression.test.ts > perspective visibility and lane containment > Speed 8: horizon 1.6x, judge line, smooth forward movement 0ms
+ ✓ src/__tests__/v3Regression.test.ts > perspective visibility and lane containment > Speed 12: horizon 1.6x, judge line, smooth forward movement 0ms
+ ✓ src/__tests__/v3Regression.test.ts > perspective visibility and lane containment > Speed 20: horizon 1.6x, judge line, smooth forward movement 0ms
+ ✓ src/__tests__/v3Regression.test.ts > one press / one closest note > nearby Tap and Hold do not both consume a single lane press 0ms
+ ✓ src/__tests__/v3Regression.test.ts > one press / one closest note > Flick preparation does not consume a nearby Tap 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > classifyByTimingDiff > 1. Perfect 경계값 (±35ms) 2ms
+ ✓ src/__tests__/judgementEngine.test.ts > classifyByTimingDiff > 2. Great 경계값 (35ms 초과 ~ 75ms) 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > classifyByTimingDiff > 3. Good 경계값 (75ms 초과 ~ 120ms) 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > classifyByTimingDiff > 4. 120ms 초과는 후보에서 제외됨 (null) 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > findNearestJudgeableNote > 5. 가장 가까운 노트만 판정 대상으로 선택된다 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > findNearestJudgeableNote > 6. 이미 처리된(pending이 아닌) 노트는 다시 판정 대상이 되지 않는다 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > findNearestJudgeableNote > 미스 윈도우(120ms)를 벗어난 노트는 후보에서 제외된다 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > findNearestJudgeableNote > 다른 레인의 노트는 후보에서 제외된다 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > findNearestJudgeableNote > uses deterministic earlier-note ordering when timing distance ties 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > Hold 판정 > 7. Hold 시작 - 판정 대상 탐색이 정상 동작한다 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > Hold 판정 > 8. Hold 조기 이탈 - 종료 시각보다 100ms 넘게 일찍 떼면 early_release 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > Hold 판정 > 9. Hold 정상 완료 - 종료 시각 근처(허용오차 이내)에 떼면 completed 0ms
+ ✓ src/__tests__/judgementEngine.test.ts > Hold 판정 > hold가 아닌 노트에 judgeHoldRelease를 호출하면 에러 1ms
+ ✓ src/__tests__/preferences.test.ts > loads defaults safely from absent, malformed or incompatible saved preferences 3ms
+ ✓ src/__tests__/preferences.test.ts > persists all phase1 preferences across reload and clamps brightness 1ms
+ ✓ src/__tests__/preferences.test.ts > does not replace legacy speed and offset storage 1ms
+ ✓ src/__tests__/preferences.test.ts > accepts a YouTube link: https://youtu.be/abcdefghijk 0ms
+ ✓ src/__tests__/preferences.test.ts > accepts a YouTube link: https://www.youtube.com/watch?v=abcdefghijk 0ms
+ ✓ src/__tests__/preferences.test.ts > accepts a YouTube link: https://music.youtube.com/watch?v=abcdefghijk 0ms
+ ✓ src/__tests__/preferences.test.ts > rejects unsafe/non-YouTube URL: javascript:alert(1) 0ms
+ ✓ src/__tests__/preferences.test.ts > rejects unsafe/non-YouTube URL: https://youtube.com.evil.test/watch?v=x 0ms
+ ✓ src/__tests__/preferences.test.ts > rejects unsafe/non-YouTube URL: https://user:pass@youtube.com/watch?v=x 0ms
+ ✓ src/__tests__/preferences.test.ts > rejects unsafe/non-YouTube URL: https://youtube.com:8080/watch?v=x 0ms
+ ✓ src/__tests__/preferences.test.ts > rejects unsafe/non-YouTube URL: https://example.com 0ms
+ ✓ src/__tests__/libraryModel.test.ts > v4 library model > distinguishes clear / full combo / perfect combo 3ms
+ ✓ src/__tests__/libraryModel.test.ts > v4 library model > keeps best values independently 2ms
+ ✓ src/__tests__/libraryModel.test.ts > v4 library model > reports first FC/PC and new best flags 1ms
+ ✓ src/__tests__/libraryModel.test.ts > v4 library model > creates stable local fingerprints 0ms
+ ✓ src/__tests__/noteSpeed.test.ts > 노트 속도 설정 > v2 기본 8.0은 약 1.2초 접근 시간을 사용한다 3ms
+ ✓ src/__tests__/noteSpeed.test.ts > 노트 속도 설정 > 고속 영역은 실제로 빠르며 20.0에서 약 0.35초다 1ms
+ ✓ src/__tests__/noteSpeed.test.ts > 노트 속도 설정 > 속도가 높을수록 같은 time-to-hit의 노트가 더 위쪽에 보인다 0ms
+ ✓ src/__tests__/noteSpeed.test.ts > 노트 속도 설정 > 속도가 높을수록 같은 duration의 hold 꼬리가 길어진다 0ms
+ ✓ src/__tests__/noteSpeed.test.ts > 노트 속도 설정 > 1.0~20.0 범위와 0.1 단위를 강제한다 1ms
+ ✓ src/__tests__/noteSpeed.test.ts > 노트 속도 설정 > 마지막 속도를 저장하고 다시 불러온다 0ms
+ ✓ src/__tests__/timingOffset.test.ts > Timing Offset v1 > 기본값은 0ms이고 -300~+300ms 범위를 1ms 단위로 강제한다 2ms
+ ✓ src/__tests__/timingOffset.test.ts > Timing Offset v1 > +offset은 채보/판정 시계를 그만큼 늦춘다 0ms
+ ✓ src/__tests__/timingOffset.test.ts > Timing Offset v1 > 기기별 localStorage 값으로 저장/복원한다 0ms
+ ✓ src/__tests__/timingOffset.test.ts > Timing Offset v1 > 보정은 첫 3개 샘플을 버리고 중앙값으로 추천값을 만든다 0ms
+ ✓ src/__tests__/timingOffset.test.ts > Timing Offset v1 > 편차가 큰 보정 샘플은 unstable로 표시한다 0ms
+ ✓ src/__tests__/scoringAndGauge.test.ts > scoring > Miss는 0점, 콤보 보너스와 무관하다 2ms
+ ✓ src/__tests__/scoringAndGauge.test.ts > scoring > 콤보가 높을수록 점수 배율이 올라간다 0ms
+ ✓ src/__tests__/scoringAndGauge.test.ts > gauge > Miss는 게이지를 감소시키고 0 밑으로 내려가지 않는다 0ms
+ ✓ src/__tests__/scoringAndGauge.test.ts > gauge > Perfect는 게이지를 MAX 이상으로 올리지 않는다 0ms
+ ✓ src/__tests__/scoringAndGauge.test.ts > gauge > failEnabled가 false면 게이지가 0이어도 실패 처리되지 않는다 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 20 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/cover.test.ts > persists a remote original thumbnail as image bytes instead of its URL
+AssertionError: expected undefined to be 'data:image/jpeg;size=960x540' // Object.is equality
+
+- Expected:
+"data:image/jpeg;size=960x540"
+
++ Received:
+undefined
+
+ ❯ src/__tests__/cover.test.ts:21:76
+     19|   const { persistOriginalThumbnail } = await import("../library/artwor…
+     20|   vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["img…
+     21|   expect(await persistOriginalThumbnail("https://example.test/thumb.jp…
+       |                                                                            ^
+     22| });
+     23|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > leaving gameplay stops the media element
+AssertionError: expected "vi.fn()" to be called at least once
+ ❯ src/__tests__/mediaLifecycle.test.tsx:60:19
+     58|     await render(); await autoStart();
+     59|     await act(async () => root.render(null));
+     60|     expect(pause).toHaveBeenCalled();
+       |                   ^
+     61|   });
+     62|   it("has no redundant START action and waits for media preparation be…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > media lifecycle and input integration > does not start before gesture; rejected play is visible and retry works
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/__tests__/mediaLifecycle.test.tsx:97:58
+     95|     expect(container.querySelector('[role="alert"]')?.textContent).toC…
+     96|     expect(debug().gameStarted).toBe(false);
+     97|     await click("재생 다시 시도"); expect(debug().gameStarted).toBe(true); e…
+       |                                                          ^
+     98|   });
+     99|   it("pause freezes judgement, releases Hold, clears stale keys and al…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > v4 asynchronous result persistence > does not attach old asynchronous achievements after restart
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/__tests__/mediaLifecycle.test.tsx:161:3
+    159|     expect(container.querySelector('[role="alert"]')).toBeNull();
+    160|   });
+    161|   it("does not attach old asynchronous achievements after restart", as…
+       |   ^
+    162|     let complete!: (value: { clearType: "PERFECT_COMBO"; newHighScore:…
+    163|     const onResult = vi.fn(() => new Promise(resolve => { complete = r…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > preload errors do not bypass the automatic countdown
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:177:77
+    175| describe("hotfix bounded media recovery", () => {
+    176|   const media = () => container.querySelector("video,audio") as HTMLMe…
+    177|   const dispatch = async (name: string) => { await act(async () => { m…
+       |                                                                             ^
+    178|   it("preload errors do not bypass the automatic countdown", async () …
+    179|     await render(); await dispatch("error");
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ dispatch src/__tests__/mediaLifecycle.test.tsx:177:52
+ ❯ src/__tests__/mediaLifecycle.test.tsx:179:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > freezes judgement during reload and restores position after metadata/seek
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:184:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > background pause cancels pending recovery; explicit resume retains checkpoint
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:194:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > restart cancels recovery and never restores the old position
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:203:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > leaving gameplay removes recovery listeners and prevents later play
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:209:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > a persistent media error stops at one failed load without an error loop
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:215:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > stalled timer does nothing after pause or before gameplay begins
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:177:77
+    175| describe("hotfix bounded media recovery", () => {
+    176|   const media = () => container.querySelector("video,audio") as HTMLMe…
+    177|   const dispatch = async (name: string) => { await act(async () => { m…
+       |                                                                             ^
+    178|   it("preload errors do not bypass the automatic countdown", async () …
+    179|     await render(); await dispatch("error");
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ dispatch src/__tests__/mediaLifecycle.test.tsx:177:52
+ ❯ src/__tests__/mediaLifecycle.test.tsx:223:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > automatically recovers stalled playback only after the 3 second threshold
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:232:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > hotfix bounded media recovery > limits repeated automatic recoveries to two per run
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:239:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > recovery timeout leaves a visible retry action and paused judgement
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:249:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > a hung play promise becomes a retryable error instead of freezing recovery forever
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:260:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > v4.75 independent Result lifecycle > keeps the outro playing, transitions after media end and removes every playfield/input/media node
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:279:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > v4.75 independent Result lifecycle > end event resolves remaining notes, saves once and blocks an orphan click
+TypeError: Cannot read properties of null (reading 'dispatchEvent')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:26:65
+     24| }
+     25| async function prepareMedia() {
+     26|   await act(async () => { container.querySelector("video,audio")!.disp…
+       |                                                                 ^
+     27| }
+     28| async function autoStart() {
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ prepareMedia src/__tests__/mediaLifecycle.test.tsx:26:9
+ ❯ autoStart src/__tests__/mediaLifecycle.test.tsx:29:9
+ ❯ src/__tests__/mediaLifecycle.test.tsx:302:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/20]⎯
+
+ FAIL  src/__tests__/mediaLifecycle.test.tsx > v4.75 independent Result lifecycle > applies persisted visual/audio settings without changing judgement
+TypeError: Cannot read properties of null (reading 'volume')
+ ❯ src/__tests__/mediaLifecycle.test.tsx:316:44
+    314|       preferences={{ ...DEFAULT_PREFERENCES, combo: false, judgementTe…
+    315|       audioSettings={{ masterVolume: .5, musicVolume: .4, sfxVolume: 0…
+    316|     expect(container.querySelector('video')!.volume).toBeCloseTo(.2);
+       |                                            ^
+    317|     expect(container.querySelector('video')!.style.opacity).toBe('0');
+    318|     expect(container.querySelector('.combo-display')!.hasAttribute('hi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/20]⎯
+
+ FAIL  src/__tests__/phase1Ui.test.tsx > reads clipboard only on Paste, requests preview only on Load, and generates only on CTA
+AssertionError: expected "vi.fn()" to be called with arguments: [ { …(7) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+@@ -17,10 +17,11 @@
+      },
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mediaKind": "audio",
+      "mediaUrl": "/media",
+      "originalName": "original.wav",
++     "originalThumbnailUrl": "https://i.ytimg.com/vi/id/hqdefault.jpg",
+      "originalTitle": "Original Song",
+      "report": {
+        "bpm": 120,
+        "bpmConfidence": 1,
+        "difficulty": "hard",
+
+
+Number of calls: 1
+
+ ❯ src/__tests__/phase1Ui.test.tsx:58:104
+     56|   expect(container.querySelector('.video-preview')!.textContent).toCon…
+     57|   expect(container.querySelector('.video-preview img')!.getAttribute('…
+     58|   await click('채보 만들기');expect(fetcher.mock.calls[1][0]).toBe('/api/an…
+       |                                                                                                        ^
+     59| });
+     60| it('clears stale preview when the URL changes',async()=>{
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/20]⎯
+
+ FAIL  src/__tests__/sfxPhase3.test.ts > initializes WebAudio and permits overlapping hit voices
+TypeError: () => ctx is not a constructor
+ ❯ getContext src/audio/sfx.ts:44:15
+     42|   const AudioCtx = window.AudioContext;
+     43|   if (!AudioCtx) return null;
+     44|   context ??= new AudioCtx();
+       |               ^
+     45|   if (context.state === "suspended") void context.resume().catch(() =>…
+     46|   return context;
+ ❯ initializeSfx src/audio/sfx.ts:38:51
+ ❯ src/__tests__/sfxPhase3.test.ts:8:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/20]⎯
+
+
+ Test Files  4 failed | 10 passed (14)
+      Tests  20 failed | 185 passed (205)
+   Start at  04:42:28
+   Duration  19.62s (environment 57%, tests 36%, transform 4%, import 2%, worker 1%)
+
+Environment  jsdom was created 14 times · 10.11s total, 57% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

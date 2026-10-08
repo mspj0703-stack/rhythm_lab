@@ -91,9 +91,10 @@ object YoutubeEngine {
         }
 
     @Synchronized
-    fun extractMedia(context: Context, url: String, onProgress: (Int, String) -> Unit): ExtractedMedia {
+    fun extractMedia(context: Context, url: String, workId: String = java.util.UUID.randomUUID().toString(), onProgress: (Int, String) -> Unit): ExtractedMedia {
         ensureInitialized(context) { onProgress(1, it) }
-        val dir = File(context.cacheDir, "rhythm_media_extract")
+        val safeWorkId = workId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80)
+        val dir = File(context.cacheDir, "rhythm_media_extract-$safeWorkId")
         var lastError: Exception? = null
         for ((attemptIndex, strategy) in youtubeStrategies.withIndex()) {
             dir.mkdirs()

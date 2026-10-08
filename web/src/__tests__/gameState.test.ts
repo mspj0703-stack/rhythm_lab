@@ -3,6 +3,7 @@ import {
   attemptFlick,
   attemptHoldRelease,
   attemptHoldStart,
+  attemptLanePress,
   attemptTap,
   calculateAccuracyPercent,
   createInitialGameState,
@@ -46,6 +47,22 @@ describe("Tap 판정 및 콤보/정확도", () => {
     const holdNoteRuntime = state.notes[2];
     expect(holdNoteRuntime.status).toBe("missed");
     expect(state.combo).toBe(0); // Miss로 콤보 초기화
+    expect(state.perfectStreak).toBe(0);
+  });
+
+  it("Perfect Streak는 Perfect에서만 이어지고 Great/Good에서 종료된다", () => {
+    let state = createInitialGameState(makeChart(), { failEnabled: false });
+    state = attemptTap(state, 0, 1.0);
+    state = attemptTap(state, 1, 2.0);
+    expect(state.perfectStreak).toBe(2);
+    expect(state.maxPerfectStreak).toBe(2);
+    const chart2 = makeChart({ notes: [{ time: 1, lane: 0, type: "tap" }, { time: 2, lane: 1, type: "tap" }] });
+    state = createInitialGameState(chart2, { failEnabled: false });
+    state = attemptTap(state, 0, 1.0);
+    state = attemptTap(state, 1, 2.05);
+    expect(state.combo).toBe(2);
+    expect(state.perfectStreak).toBe(0);
+    expect(state.maxPerfectStreak).toBe(1);
   });
 
   it("12. Accuracy 계산이 판정 가중치를 정확히 반영한다", () => {
@@ -139,6 +156,50 @@ describe("Flick 판정", () => {
     const before = state;
     state = attemptTap(state, 3, 5.0);
     expect(state).toBe(before); // 변화 없음
+  });
+});
+
+
+describe("v4.8 multi-lane regression", () => {
+  it("Tap + Tap을 같은 시각에 서로 다른 레인에서 독립 처리한다", () => {
+    const chart = makeChart({ notes: [
+      { time: 1, lane: 0, type: "tap" },
+      { time: 1, lane: 1, type: "tap" },
+    ] });
+    let state = createInitialGameState(chart, { failEnabled: false });
+    state = attemptLanePress(state, 0, 1);
+    state = attemptLanePress(state, 1, 1);
+    expect(state.notes.map(n => n.status)).toEqual(["hit", "hit"]);
+    expect(state.combo).toBe(2);
+  });
+
+  it("Tap + Hold 및 Hold + Hold 동시 입력이 서로를 소비하지 않는다", () => {
+    let state = createInitialGameState(makeChart({ notes: [
+      { time: 1, lane: 0, type: "tap" },
+      { time: 1, lane: 1, type: "hold", duration: 1 },
+      { time: 1, lane: 2, type: "hold", duration: 1 },
+    ] }), { failEnabled: false });
+    state = attemptLanePress(state, 0, 1);
+    state = attemptLanePress(state, 1, 1);
+    state = attemptLanePress(state, 2, 1);
+    expect(state.notes[0].status).toBe("hit");
+    expect(state.notes[1].status).toBe("holding");
+    expect(state.notes[2].status).toBe("holding");
+  });
+
+  it("Hold 유지 중 다른 레인의 Tap/Flick 판정이 Hold 상태를 깨지 않는다", () => {
+    let state = createInitialGameState(makeChart({ notes: [
+      { time: 1, lane: 0, type: "hold", duration: 2 },
+      { time: 1.3, lane: 1, type: "tap" },
+      { time: 1.6, lane: 2, type: "flick" },
+    ] }), { failEnabled: false });
+    state = attemptLanePress(state, 0, 1);
+    state = attemptLanePress(state, 1, 1.3);
+    expect(state.notes[0].status).toBe("holding");
+    state = attemptFlick(state, 2, 1.6);
+    expect(state.notes[0].status).toBe("holding");
+    expect(state.notes[1].status).toBe("hit");
+    expect(state.notes[2].status).toBe("hit");
   });
 });
 

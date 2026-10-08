@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from . import config as C
 from .beatgrid import BeatGrid, align_grid_to_onsets
 from .chart import build_chart, build_report
+from .chart_ai_v2 import refine_selected_events
 from .errors import InvalidOptionError
 from .events import MusicalEvent, build_events
 from .features import AudioFeatures, extract_features, extract_features_from_signal, log_stage
@@ -50,6 +51,7 @@ def generate_from_features(features: AudioFeatures, difficulty: str, seed: int, 
     events = build_events(features, grid) if features.onset_frames.size else []
     log_stage("event generation", started)
     selected, fstats = select_events(events, cfg)
+    selected, v2stats = refine_selected_events(selected, cfg)
     planned, usage = assign_lanes(selected, cfg, seed)
     final, pstats = apply_playability(planned, cfg)
     typed, ntstats = assign_note_types(final, features, cfg)
@@ -62,7 +64,7 @@ def generate_from_features(features: AudioFeatures, difficulty: str, seed: int, 
         bpm=features.bpm, duration=features.duration, raw_onsets=int(features.onset_frames.size),
         event_count=len(events), filtered_count=len(selected), notes=typed,
         repetition_fixes=pstats.repetition_fixes, pattern_usage=usage,
-        filter_stats=asdict(fstats), playability_stats=asdict(pstats),
+        filter_stats={**asdict(fstats), "chartAiV2": asdict(v2stats)}, playability_stats=asdict(pstats),
         warnings=list(features.warnings), difficulty=cfg.name, seed=seed,
         bpm_confidence=features.bpm_confidence,
         tempo_candidates=[x.to_dict() for x in features.tempo_candidates],

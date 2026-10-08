@@ -20,6 +20,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Load release version
+        id: release
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < web/VERSION)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Expected version: $version"
       - name: Stamp deployment revision
         run: printf '%s\n' "$GITHUB_SHA" > web/BUILD_REVISION
       - name: Verify root Dockerfile before deployment
@@ -38,19 +46,12 @@ jobs:
       - name: Verify deployed revision
         env:
           HEALTH_URL: https://web-production-e18dd.up.railway.app/api/health
-        run: |
-          python3 - <<'PYTHON'
-          import json, os, time, urllib.request
-          for attempt in range(60):
-              try:
-                  with urllib.request.urlopen(os.environ["HEALTH_URL"], timeout=10) as response:
-                      health = json.load(response)
-                  if health.get("ok") and health.get("version") == "4.75.0-rc.phase1" and health.get("revision") == os.environ["GITHUB_SHA"]:
-                      print("PASS deployed revision", health["revision"])
-                      break
-              except Exception as error:
-                  print(type(error).__name__, str(error))
-              time.sleep(5)
-          else:
-              raise SystemExit("Deployment health/revision did not match; retain rollback sources")
-          PYTHON
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        run: >-
+          python3 scripts/verify_deployment.py
+          --url "$HEALTH_URL"
+          --expected-version "$EXPECTED_VERSION"
+          --expected-revision "$GITHUB_SHA"
+          --attempts 60
+          --interval 5
+          --stable-mismatch-limit 6

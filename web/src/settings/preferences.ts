@@ -6,16 +6,17 @@ export interface Preferences {
   effects: "low" | "normal" | "high";
   combo: boolean;
   vibration: boolean;
+  perfectStreak: boolean;
 }
 export const PREFERENCES_KEY = "beatdash.preferences.v475";
 export const DEFAULT_PREFERENCES: Preferences = {
   fastSlow: true, judgementText: true, backgroundVideo: true,
-  backgroundBrightness: 0.4, effects: "normal", combo: true, vibration: false,
+  backgroundBrightness: 0.4, effects: "normal", combo: true, vibration: false, perfectStreak: true,
 };
 export function normalizePreferences(raw: unknown): Preferences {
   const value = raw && typeof raw === "object" ? raw as Partial<Preferences> : {};
   const next = { ...DEFAULT_PREFERENCES };
-  for (const key of ["fastSlow", "judgementText", "backgroundVideo", "combo", "vibration"] as const) {
+  for (const key of ["fastSlow", "judgementText", "backgroundVideo", "combo", "vibration", "perfectStreak"] as const) {
     if (typeof value[key] === "boolean") next[key] = value[key];
   }
   if (typeof value.backgroundBrightness === "number" && Number.isFinite(value.backgroundBrightness)) next.backgroundBrightness = Math.max(0, Math.min(1, value.backgroundBrightness));

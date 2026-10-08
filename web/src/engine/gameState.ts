@@ -36,6 +36,8 @@ export interface GameState {
   score: number;
   combo: number;
   maxCombo: number;
+  perfectStreak: number;
+  maxPerfectStreak: number;
   gauge: number;
   failed: boolean;
   finished: boolean;
@@ -57,6 +59,8 @@ export function createInitialGameState(chart: Chart, options: GameOptions): Game
     score: 0,
     combo: 0,
     maxCombo: 0,
+    perfectStreak: 0,
+    maxPerfectStreak: 0,
     gauge: GAUGE_CONFIG.INITIAL,
     failed: false,
     finished: false,
@@ -86,17 +90,20 @@ function applyJudgement(
   feedback: Omit<JudgementFeedback, "sequence">
 ): Pick<
   GameState,
-  "score" | "combo" | "maxCombo" | "gauge" | "failed" | "judgementCounts" | "totalJudged" | "accuracyWeightSum" | "lastJudgement" | "lastFeedback" | "feedbackSequence"
+  "score" | "combo" | "maxCombo" | "perfectStreak" | "maxPerfectStreak" | "gauge" | "failed" | "judgementCounts" | "totalJudged" | "accuracyWeightSum" | "lastJudgement" | "lastFeedback" | "feedbackSequence"
 > {
   const comboBefore = state.combo;
   const scoreDelta = calculateNoteScore(judgement, comboBefore);
   const nextCombo = judgement === "Miss" ? 0 : state.combo + 1;
   const nextGauge = applyJudgementToGauge(state.gauge, judgement);
+  const nextPerfectStreak = judgement === "Perfect" ? state.perfectStreak + 1 : 0;
 
   return {
     score: state.score + scoreDelta,
     combo: nextCombo,
     maxCombo: Math.max(state.maxCombo, nextCombo),
+    perfectStreak: nextPerfectStreak,
+    maxPerfectStreak: Math.max(state.maxPerfectStreak, nextPerfectStreak),
     gauge: nextGauge,
     failed: state.failed || isFailed(nextGauge, state.options.failEnabled),
     judgementCounts: {

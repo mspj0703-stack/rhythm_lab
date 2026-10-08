@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { artworkForSong, getBestRecordsForSong, getRecordsForChart, updateSongCustomCover, updateSongOffset, updateSongTitle } from "../../library/db";
 import { prepareCustomCover } from "../../library/cover";
+import { hasNativeArtworkPicker, requestNativeArtwork } from "../../library/nativeArtwork";
 import { loadAudioSettings, playNoticeSfx } from "../../audio/sfx";
 import { normalizeTimingOffsetMs } from "../../settings/timingOffset";
 import type { BestRecord, LibraryBundle, LibraryChart, PlayRecord } from "../../library/types";
@@ -71,13 +72,34 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
     finally { setGenerating(null); }
   }
 
+  useEffect(() => {
+    const onNativeCover = (event: Event) => {
+      const data = (event as CustomEvent<string>).detail;
+      if (!data?.startsWith("data:image/")) return;
+      setCoverBusy(true);
+      setError(null);
+      void updateSongCustomCover(bundle.song.id, data).then(onChanged).catch((e: Error) => setError(e.message)).finally(() => setCoverBusy(false));
+    };
+    const onNativeCoverError = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail;
+      setCoverBusy(false);
+      setError(message || "커버 이미지를 처리할 수 없습니다.");
+    };
+    window.addEventListener("beatdash:native-cover", onNativeCover);
+    window.addEventListener("beatdash:native-cover-error", onNativeCoverError);
+    return () => {
+      window.removeEventListener("beatdash:native-cover", onNativeCover);
+      window.removeEventListener("beatdash:native-cover-error", onNativeCoverError);
+    };
+  }, [bundle.song.id, onChanged]);
+
   const record = selected ? bests[selected.difficulty] : null;
   return (
     <main className="v4-shell detail-page">
       <header className="v4-topbar"><button className="text-back" onClick={onBack}>← LIBRARY</button><div className="brand-lockup compact"><span className="brand-mark">B</span><strong>SONG</strong></div><span/></header>
       {error && <p role="alert">{error}</p>}
       <section className="detail-hero">
-        <div><div className="detail-art">{artworkForSong(bundle.song) ? <img src={artworkForSong(bundle.song)} alt=""/> : <span>{bundle.song.mediaKind === "video" ? "MV" : "♪"}</span>}</div><div className="cover-actions"><label className="small-primary">커버 변경<input hidden disabled={coverBusy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; void changeCover(file); }}/></label><button disabled={coverBusy || !bundle.song.customCover} onClick={() => void restoreOriginalCover()}>원본 썸네일로 되돌리기</button></div></div>
+        <div><div className="detail-art">{artworkForSong(bundle.song) ? <img src={artworkForSong(bundle.song)} alt=""/> : <span>{bundle.song.mediaKind === "video" ? "MV" : "♪"}</span>}</div><div className="cover-actions">{hasNativeArtworkPicker() ? <button className="small-primary" disabled={coverBusy} onClick={requestNativeArtwork}>커버 변경</button> : <label className="small-primary">커버 변경<input hidden disabled={coverBusy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; void changeCover(file); }}/></label>}<button disabled={coverBusy || !bundle.song.customCover} onClick={() => void restoreOriginalCover()}>원본 썸네일로 되돌리기</button></div></div>
         <div className="detail-copy"><span className="eyebrow">LOCAL SONG</span><div className="title-edit"><input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => void saveTitle()} aria-label="곡 제목"/><button onClick={() => void saveTitle()}>SAVE</button></div><p>원본: {bundle.song.originalTitle}</p><div className="song-meta-pills"><span>{bundle.song.bpm.toFixed(1)} BPM</span><span>{Math.round(bundle.song.durationSec)} sec</span><span>{bundle.song.mediaKind.toUpperCase()}</span><span>추가: {new Date(bundle.song.createdAt).toLocaleDateString()}</span></div></div>
       </section>
 
