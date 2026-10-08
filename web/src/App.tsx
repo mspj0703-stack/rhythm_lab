@@ -8,7 +8,9 @@ import { EvaluationPanel } from "./web/EvaluationPanel";
 import type { AnalysisResponse } from "./web/types";
 import { loadNoteSpeed, normalizeNoteSpeed, saveNoteSpeed } from "./settings/noteSpeed";
 import { combineTimingOffsets, loadTimingOffsetMs, normalizeTimingOffsetMs, saveTimingOffsetMs } from "./settings/timingOffset";
-import { deleteSong, getLibrarySong, listLibrary, mediaUrlForSong, saveAnalysisToLibrary, savePlayResult, updateSongThumbnail } from "./library/db";
+import { deleteSong, getLibrarySong, listLibrary, saveAnalysisToLibrary, savePlayResult, updateSongThumbnail } from "./library/db";
+import { openSongMedia, useMediaHandleRelease, type SongMediaHandle } from "./library/mediaSource";
+import { deriveAudioFallbackUrls } from "./engine/mediaSources";
 import { captureThumbnail } from "./library/thumbnail";
 import type { LibraryBundle, LibraryChart } from "./library/types";
 import { HomeScreen } from "./components/v4/HomeScreen";
@@ -28,7 +30,7 @@ const DEFAULT_VIDEO = "/test-video.mp4";
 type View = "home" | "library" | "upload" | "analysis" | "detail" | "play" | "settings" | "feedback";
 
 interface Source { chartUrl: string | null; videoUrl: string; }
-interface LibraryPlay { bundle: LibraryBundle; chart: LibraryChart; mediaUrl: string; }
+interface LibraryPlay { bundle: LibraryBundle; chart: LibraryChart; media: SongMediaHandle; }
 
 function readSource(): Source {
   const params = new URLSearchParams(window.location.search);
@@ -145,9 +147,9 @@ function App() {
     return () => { cancelled = true; };
   }, [companionSession, legacyMode, savedCompanion, cacheAnalysis]);
 
-  useEffect(() => () => {
-    if (libraryPlay?.mediaUrl.startsWith("blob:")) URL.revokeObjectURL(libraryPlay.mediaUrl);
-  }, [libraryPlay]);
+  // The object URL is revoked only after React has committed a screen that no longer uses it
+  // (song replaced or play screen left) - never while the player may still seek, reload or fall back.
+  useMediaHandleRelease(libraryPlay?.media);
 
   useEffect(() => {
     if (!selectedSongId) return;
@@ -196,15 +198,22 @@ function App() {
     setView("detail");
   }
 
+  // Retry in the player asks for a fresh media resource (a new object URL for Blob songs).
+  function reacquireLibraryMedia() {
+    if (!libraryPlay) return;
+    const media = openSongMedia(libraryPlay.bundle.song);
+    if (media) setLibraryPlay({ ...libraryPlay, media });
+  }
+
   async function startLibraryPlay(chart: LibraryChart) {
     if (!selectedBundle) return;
     const bundle = await getLibrarySong(selectedBundle.song.id);
     if (!bundle) { setLibraryError("곡이 삭제되었습니다. Library에서 다시 선택해 주세요."); return; }
     const currentChart = bundle.charts.find((item) => item.id === chart.id);
     if (!currentChart) { setLibraryError("채보를 다시 선택해 주세요."); return; }
-    const mediaUrl = mediaUrlForSong(bundle.song);
-    if (!mediaUrl) { setLibraryError("이 곡의 미디어 파일을 찾을 수 없습니다. 다시 분석해 주세요."); return; }
-    setLibraryPlay({ bundle, chart: currentChart, mediaUrl });
+    const media = openSongMedia(bundle.song);
+    if (!media) { setLibraryError("이 곡의 미디어 파일을 찾을 수 없습니다. 다시 분석해 주세요."); return; }
+    setLibraryPlay({ bundle, chart: currentChart, media });
     setView("play");
   }
 
@@ -260,15 +269,15 @@ function App() {
   }
 
   if (view === "play" && libraryPlay) {
-    const { bundle, chart, mediaUrl } = libraryPlay;
-    return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("detail")}>← 곡 상세</button><span>{bundle.song.title}</span><span className="companion-badge">LIBRARY</span></div><GameScreen key={`${chart.id}:${chart.chartVersion}`} chart={chart.chart} songTitle={bundle.song.title} mediaUrl={mediaUrl} mediaKind={bundle.song.mediaKind} mediaMuted={false} noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => nav("detail")} onResult={(result) => savePlayResult({ songId: bundle.song.id, chartId: chart.id, chartVersion: chart.chartVersion, difficulty: chart.difficulty, result, offsetMs: combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs) }).then((feedback) => { void refreshLibrary(); return feedback; })} /></main>;
+    const { bundle, chart, media } = libraryPlay;
+    return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("detail")}>← 곡 상세</button><span>{bundle.song.title}</span><span className="companion-badge">LIBRARY</span></div><GameScreen key={`${chart.id}:${chart.chartVersion}`} chart={chart.chart} songTitle={bundle.song.title} mediaUrl={media.url} audioFallbackUrls={media.audioFallbackUrls} onRetryMedia={reacquireLibraryMedia} mediaKind={bundle.song.mediaKind} mediaMuted={false} noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => nav("detail")} onResult={(result) => savePlayResult({ songId: bundle.song.id, chartId: chart.id, chartVersion: chart.chartVersion, difficulty: chart.difficulty, result, offsetMs: combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs) }).then((feedback) => { void refreshLibrary(); return feedback; })} /></main>;
   }
 
   if (!analysis) return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
   if (view === "analysis") return <>{libraryErrorBanner}<AnalysisSummary data={analysis} saved={savedCompanion} onPlay={() => nav("play")} onReset={() => void resetAnalysis()} noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} /></>;
 
   const parsed = parseChart(JSON.stringify(analysis.chart));
-  return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("analysis")}>← 곡 설정</button><span>{analysis.originalName}</span>{analysisBundle && <span className="companion-badge">LIBRARY SAVED</span>}</div><GameScreen key={analysis.id} chart={parsed} mediaUrl={analysis.mediaUrl} mediaKind={analysis.mediaKind} mediaMuted={false} resultExtra={savedCompanion ? undefined : <EvaluationPanel analysisId={analysis.id} songName={analysis.chart.title} />} noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => analysisBundle ? void openSong(analysisBundle.song.id) : nav("analysis")} onResult={analysisBundle ? (result) => savePlayResult({ songId: analysisBundle.song.id, chartId: analysisBundle.charts[0].id, chartVersion: analysisBundle.charts[0].chartVersion, difficulty: analysisBundle.charts[0].difficulty, result, offsetMs: timingOffsetMs }).then((feedback) => { void refreshLibrary(); return feedback; }) : undefined} /></main>;
+  return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("analysis")}>← 곡 설정</button><span>{analysis.originalName}</span>{analysisBundle && <span className="companion-badge">LIBRARY SAVED</span>}</div><GameScreen key={analysis.id} chart={parsed} mediaUrl={analysis.mediaUrl} audioFallbackUrls={deriveAudioFallbackUrls(analysis.mediaUrl, analysis.mediaKind)} mediaKind={analysis.mediaKind} mediaMuted={false} resultExtra={savedCompanion ? undefined : <EvaluationPanel analysisId={analysis.id} songName={analysis.chart.title} />} noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => analysisBundle ? void openSong(analysisBundle.song.id) : nav("analysis")} onResult={analysisBundle ? (result) => savePlayResult({ songId: analysisBundle.song.id, chartId: analysisBundle.charts[0].id, chartVersion: analysisBundle.charts[0].chartVersion, difficulty: analysisBundle.charts[0].difficulty, result, offsetMs: timingOffsetMs }).then((feedback) => { void refreshLibrary(); return feedback; }) : undefined} /></main>;
 }
 
 export default App;
