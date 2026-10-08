@@ -1,4 +1,4 @@
-import type { Chart } from "../types/chart";
+import type { Chart, ChartPlatform } from "../types/chart";
 
 export type ClearType = "CLEAR" | "FULL_COMBO" | "PERFECT_COMBO";
 export type MediaKind = "audio" | "video";
@@ -27,6 +27,8 @@ export interface LibrarySong {
 }
 
 export interface LibraryChart {
+  variantKey?: string;
+  platformProfile?: ChartPlatform;
   id: string;
   songId: string;
   difficulty: string;
@@ -44,6 +46,10 @@ export interface LibraryChart {
 }
 
 export interface PlayRecord {
+  platform?: ChartPlatform;
+  chartProfile?: ChartPlatform;
+  scoringVersion?: 1 | 2;
+  holdTickScore?: number;
   id: string;
   songId: string;
   chartId: string;

@@ -7,6 +7,7 @@ beat 간격이 곡 중간에 흔들려도(tempo drift) 인접 beat 사이를 선
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import gcd
 
 import numpy as np
 
@@ -100,11 +101,7 @@ class BeatGrid:
 
 def _division_of(k: int, subdivisions: int) -> int:
     """beat 내 k번째 칸이 몇 분음표 위치인지. subdivisions=4 기준: 0->4, 2->8, 1/3->16"""
-    if k == 0:
-        return 4
-    if subdivisions % 2 == 0 and k == subdivisions // 2:
-        return 8
-    return 16
+    return 4 * subdivisions // gcd(k, subdivisions)
 
 
 def align_grid_to_onsets(grid: BeatGrid, onset_times: np.ndarray, weights: np.ndarray) -> tuple[BeatGrid, float]:

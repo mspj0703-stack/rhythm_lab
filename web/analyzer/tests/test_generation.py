@@ -49,8 +49,15 @@ def test_05_to_08_structural_invariants(gen, name, diff):
     keys = [(n["time"], n["lane"]) for n in notes]
     assert len(keys) == len(set(keys))
     # 8. 최소 note 간격 (반올림 오차 1ms 허용)
-    gaps = [b - a for a, b in zip(times, times[1:], strict=False)]
+    distinct_times = sorted(set(times))
+    gaps = [b - a for a, b in zip(distinct_times, distinct_times[1:], strict=False)]
     assert min(gaps) >= cfg.min_interval_sec - 0.001, min(gaps)
+    # v5 simultaneous chords are exactly two different lanes, one on each hand.
+    for time in set(times):
+        simultaneous = [n for n in notes if n["time"] == time]
+        assert len(simultaneous) <= 2
+        if len(simultaneous) == 2:
+            assert {n["lane"] // 2 for n in simultaneous} == {0, 1}
     # 같은 레인 최소 간격
     last = {}
     for n in notes:

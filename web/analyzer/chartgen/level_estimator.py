@@ -32,6 +32,7 @@ DIFFICULTY_TIE_BREAK = {
     "Normal": 0.25,
     "Hard": 0.60,
     "Expert": 0.90,
+    "Extreme": 1.10,
 }
 
 

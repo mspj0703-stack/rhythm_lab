@@ -67,6 +67,26 @@ def test_reject_bad_difficulty():
     assert r.status_code == 400
 
 
+def test_v5_desktop_extreme_upload_and_restore():
+    response = client.post("/api/analyze", files={"file": ("v5.wav", wav_bytes(), "audio/wav")},
+                           data={"difficulty": "extreme", "platform": "desktop", "seed": "42"})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["chart"]["platformProfile"] == "desktop"
+    assert data["chart"]["scoringVersion"] == 2 and data["chart"]["difficulty"] == "Extreme"
+    assert all(note["type"] != "flick" for note in data["chart"]["notes"])
+    assert client.get(f"/api/session/{data['id']}").json()["chart"] == data["chart"]
+    assert client.delete(f"/api/session/{data['id']}").status_code == 200
+
+
+def test_v5_bad_platform_is_rejected_before_io(monkeypatch):
+    import app as module
+    monkeypatch.setattr(module, "_download_youtube", lambda *args: (_ for _ in ()).throw(AssertionError("must not download")))
+    assert client.post("/api/analyze", files={"file": ("v5.wav", b"", "audio/wav")},
+                       data={"platform": "invalid"}).status_code == 400
+    assert client.post("/api/analyze-youtube", json={"url": "https://youtu.be/abcdefghijk", "platform": "invalid"}).status_code == 400
+
+
 def test_youtube_preview_metadata_only(monkeypatch):
     import app as module
     import json

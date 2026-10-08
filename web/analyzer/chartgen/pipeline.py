@@ -21,6 +21,7 @@ from .filtering import select_events
 from .level_estimator import estimate_chart_level
 from .note_types import assign_note_types
 from .patterns import PlannedNote, assign_lanes
+from .platform_patterns import accent_chords, keyboard_lanes, validate_platform
 from .playability import apply_playability
 from .quality import compute_quality_metrics
 
@@ -41,10 +42,13 @@ def get_difficulty(name: str) -> C.DifficultyConfig:
     return C.DIFFICULTIES[key]
 
 
-def generate_from_features(features: AudioFeatures, difficulty: str, seed: int, title: str) -> GenerationResult:
+def generate_from_features(
+    features: AudioFeatures, difficulty: str, seed: int, title: str, platform: str = "mobile"
+) -> GenerationResult:
     started = time.monotonic()
     cfg = get_difficulty(difficulty)
-    grid = BeatGrid.from_beats(features.beat_times, features.duration)
+    validate_platform(platform)
+    grid = BeatGrid.from_beats(features.beat_times, features.duration, subdivisions=8 if cfg.name == "Extreme" else 4)
     if features.onset_frames.size:
         weights = features.onset_env[features.onset_frames]
         grid, _ = align_grid_to_onsets(grid, features.onset_times, weights)
@@ -54,10 +58,14 @@ def generate_from_features(features: AudioFeatures, difficulty: str, seed: int, 
     selected, v2stats = refine_selected_events(selected, cfg)
     planned, usage = assign_lanes(selected, cfg, seed)
     final, pstats = apply_playability(planned, cfg)
-    typed, ntstats = assign_note_types(final, features, cfg)
+    if platform == "desktop" or cfg.name == "Extreme":
+        final = keyboard_lanes(final, cfg)
+    typed, ntstats = assign_note_types(final, features, cfg, platform)
+    typed = accent_chords(typed, cfg, platform)
     level_estimate = estimate_chart_level(typed, cfg.name)
 
     chart = build_chart(typed, cfg, features.bpm, title, level=level_estimate.level)
+    chart.update(version=5, platformProfile=platform, scoringVersion=2)
     log_stage("chart generation", started)
     quality = compute_quality_metrics(features=features, events=events, selected_count=len(selected), notes=typed)
     report = build_report(
@@ -72,18 +80,24 @@ def generate_from_features(features: AudioFeatures, difficulty: str, seed: int, 
         note_type_stats=asdict(ntstats),
         level_estimate=asdict(level_estimate),
     )
+    report.update(generatorVersion="5.0.0-phase1", platformProfile=platform)
     return GenerationResult(chart, report, features, events, typed)
 
 
-def generate_chart(audio_path: str, difficulty: str = "normal", seed: int = 0, title: str | None = None) -> GenerationResult:
+def generate_chart(
+    audio_path: str, difficulty: str = "normal", seed: int = 0, title: str | None = None, platform: str = "mobile"
+) -> GenerationResult:
     get_difficulty(difficulty)  # 오디오 분석 전에 옵션 먼저 검증
+    validate_platform(platform)
     features = extract_features(audio_path)
     if title is None:
         title = os.path.splitext(os.path.basename(audio_path))[0]
-    return generate_from_features(features, difficulty, seed, title)
+    return generate_from_features(features, difficulty, seed, title, platform)
 
 
 def generate_chart_from_signal(
-    y, sr: int, difficulty: str = "normal", seed: int = 0, title: str = "Generated Chart"
+    y, sr: int, difficulty: str = "normal", seed: int = 0, title: str = "Generated Chart", platform: str = "mobile"
 ) -> GenerationResult:
-    return generate_from_features(extract_features_from_signal(y, sr), difficulty, seed, title)
+    get_difficulty(difficulty)
+    validate_platform(platform)
+    return generate_from_features(extract_features_from_signal(y, sr), difficulty, seed, title, platform)

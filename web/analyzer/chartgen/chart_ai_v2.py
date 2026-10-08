@@ -22,7 +22,7 @@ def refine_selected_events(events: list[MusicalEvent], cfg: DifficultyConfig) ->
         stats.output_count = len(events); return list(events), stats
     out: list[MusicalEvent] = []
     # Easy/Normal need the strongest cleanup; Expert intentionally retains expressive density.
-    filler_ratio = {"Easy": .92, "Normal": .82, "Hard": .70, "Expert": .58}[cfg.name]
+    filler_ratio = {"Easy": .92, "Normal": .82, "Hard": .70, "Expert": .58, "Extreme": .50}[cfg.name]
     for i, event in enumerate(events):
         accent = event.beat_aligned or event.local_contrast >= .72 or event.salience >= .72
         if accent:

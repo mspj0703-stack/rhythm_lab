@@ -25,7 +25,7 @@ const KEY_TO_LANE: Record<string, Lane> = Object.entries(LANE_KEYS).reduce(
  * 입력 로직(여기)과 판정 로직(engine/gameState)을 분리하기 위해,
  * 이 훅은 "무엇을 어떻게 판정할지"는 전혀 모르고 이벤트만 전달한다.
  */
-export function useInputManager(callbacks: InputCallbacks, enabled: boolean, paused = false) {
+export function useInputManager(callbacks: InputCallbacks, enabled: boolean, paused = false, allowFlick = true) {
   const laneKeyDownAt = useRef<Partial<Record<Lane, number>>>({});
   const spaceDownAt = useRef<number | null>(null);
   const heldKeys = useRef<Set<string>>(new Set());
@@ -58,6 +58,7 @@ export function useInputManager(callbacks: InputCallbacks, enabled: boolean, pau
       const now = performance.now();
 
       if (key === FLICK_MODIFIER_KEY.toLowerCase() || e.key === " ") {
+        if (!allowFlick) return;
         spaceDownAt.current = now;
         // 이미 어떤 레인 키가 눌려있는 상태에서 space가 나중에 들어온 경우 조합 체크
         for (const [laneStr, downAt] of Object.entries(laneKeyDownAt.current)) {
@@ -77,7 +78,7 @@ export function useInputManager(callbacks: InputCallbacks, enabled: boolean, pau
 
       // space가 먼저 눌려있는 상태에서 레인 키가 나중에 들어온 경우 조합 체크
       if (
-        spaceDownAt.current !== null &&
+        allowFlick && spaceDownAt.current !== null &&
         now - spaceDownAt.current <= FLICK_COMBINE_WINDOW_MS &&
         !flickConsumed.current.has(lane)
       ) {
@@ -115,5 +116,5 @@ export function useInputManager(callbacks: InputCallbacks, enabled: boolean, pau
       window.removeEventListener("keyup", handleKeyUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, callbacks, paused]);
+  }, [enabled, callbacks, paused, allowFlick]);
 }

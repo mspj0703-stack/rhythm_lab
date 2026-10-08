@@ -431,7 +431,7 @@ export function GameScreen({
     onPauseToggle: handlePauseToggle,
   }), [handleLaneKeyDown, handleLaneKeyUp, handleFlick, handlePauseToggle]);
 
-  useInputManager(inputCallbacks, gameStarted && !state.finished, paused);
+  useInputManager(inputCallbacks, gameStarted && !state.finished, paused, chart.notes.some(note => note.type === "flick"));
 
   const handleRestart = useCallback(() => {
     setSongEnded(false); setShowResult(false);
@@ -571,7 +571,7 @@ export function GameScreen({
       : feedback?.judgement ?? null;
 
   const saveError = recordError && <div role="alert">{recordError}<button onClick={() => { reportedResult.current = false; setRecordError(null); setRecordRetry(value => value + 1); }}>기록 저장 다시 시도</button></div>;
-  if (showResult) return <div className="result-page">{saveError}<ResultScreen title={songTitle ?? chart.title} difficulty={chart.difficulty} result={result} onRestart={handleRestart} feedback={recordFeedback} onLibrary={onLibrary} onSongDetail={onSongDetail}/>{resultExtra && <details className="result-extra"><summary>Rate AI Chart</summary>{resultExtra}</details>}</div>;
+  if (showResult) return <div className="result-page">{saveError}<ResultScreen title={songTitle ?? chart.title} difficulty={`${chart.difficulty} · ${chart.platformProfile ?? "Legacy"}`} result={result} onRestart={handleRestart} feedback={recordFeedback} onLibrary={onLibrary} onSongDetail={onSongDetail}/>{resultExtra && <details className="result-extra"><summary>Rate AI Chart</summary>{resultExtra}</details>}</div>;
 
   return (
     <div className={`game-screen effects-${preferences.effects} ${songEnded ? "finishing" : ""}`}>

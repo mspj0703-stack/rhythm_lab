@@ -597,3 +597,16 @@ button { -webkit-tap-highlight-color: transparent; }
 .feedback-context { display: flex; flex-wrap: wrap; gap: 8px; }
 .feedback-context span { padding: 5px 9px; border-radius: 999px; background: rgba(255,255,255,.07); font-size: 12px; }
 .note-flick-marker { filter: drop-shadow(0 0 7px currentColor); }
+
+/* v5 small additions: platform selector and bundled notices. */
+.chart-platform-select { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:12px 0; color:#bbb5c8; font-size:13px; }
+.chart-platform-select select { max-width:100%; background:#17131e; color:#f0edf6; border:1px solid #494052; border-radius:8px; padding:10px; }
+.notice-panel { margin:12px 0 20px; padding:14px 16px; border:1px solid #3c344a; border-radius:12px; background:#121019; }
+.notice-heading { display:flex; gap:12px; align-items:center; flex-wrap:wrap; font-size:13px; }
+.notice-heading strong { color:#d5c5ef; }
+.notice-panel summary { cursor:pointer; color:#a9a1b5; font-size:12px; margin-top:8px; padding:6px 0; }
+.notice-panel article { border-top:1px solid #332b40; margin-top:10px; padding-top:6px; }
+.notice-panel h3 { font-size:14px; color:#f2edf9; }
+.notice-panel time, .notice-panel small { font-size:11px; color:#a49bae; }
+.notice-panel p { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.6; color:#bbb3c8; }
+.difficulty-grid { grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); }

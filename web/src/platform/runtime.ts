@@ -17,3 +17,9 @@ export function detectBeatdashPlatform(search = window.location.search): Beatdas
 export const BEATDASH_PLATFORM: BeatdashPlatform = detectBeatdashPlatform();
 export const isDesktop = BEATDASH_PLATFORM === "DESKTOP";
 export const isAndroid = BEATDASH_PLATFORM === "ANDROID";
+
+export function defaultChartPlatform(): "mobile" | "desktop" {
+  if (isAndroid) return "mobile";
+  if (isDesktop) return "desktop";
+  return window.matchMedia?.("(pointer: coarse)").matches ? "mobile" : "desktop";
+}

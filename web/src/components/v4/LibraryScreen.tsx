@@ -56,7 +56,7 @@ export function LibraryScreen({ library, onBack, onAddSong, onOpenSong }: Props)
               <div className="library-art">{artworkForSong(song) ? <img src={artworkForSong(song)} alt=""/> : <span>{song.mediaKind === "video" ? "MV" : "♪"}</span>}</div>
               <div className="library-main"><strong>{song.title}</strong><span>{song.bpm.toFixed(1)} BPM · {Math.round(song.durationSec)}s</span></div>
               <div className="library-difficulties">
-                {charts.slice().sort((a,b) => a.level-b.level).map((chart) => <span key={chart.id}><small>{chart.difficulty.slice(0,3).toUpperCase()}</small><b className={`clear-${clearBadge(bests[song.id]?.[chart.difficulty]).toLowerCase()}`}>{clearBadge(bests[song.id]?.[chart.difficulty])}</b></span>)}
+                {charts.slice().sort((a,b) => a.level-b.level).map((chart) => <span key={chart.id}><small>{chart.difficulty.slice(0,3).toUpperCase()} · {chart.chart.platformProfile === "desktop" ? "PC" : chart.chart.platformProfile === "mobile" ? "M" : "LEG"}</small><b className={`clear-${clearBadge(bests[song.id]?.[chart.id]).toLowerCase()}`}>{clearBadge(bests[song.id]?.[chart.id])}</b></span>)}
               </div>
               <span className="row-arrow">›</span>
             </button>

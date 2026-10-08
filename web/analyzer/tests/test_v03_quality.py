@@ -64,7 +64,7 @@ def test_fuzzy_phrase_similarity_rejects_different_shape():
 def test_v03_quality_report_fields(gen):
     r = gen("accent.wav", "hard", 42)
     rep = r.report
-    assert rep["generatorVersion"] == "0.3.0-rc.1"
+    assert rep["generatorVersion"] == "5.0.0-phase1"
     assert rep["tempoCandidates"]
     q = rep["quality"]
     required = {

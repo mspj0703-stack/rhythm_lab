@@ -10,6 +10,7 @@ import {
   judgeHoldRelease,
 } from "./judgementEngine";
 import { calculateNoteScore } from "./scoring";
+import { advanceHoldTicks } from "./holdTicks";
 import { applyJudgementToGauge, isFailed } from "./gauge";
 import { ACCURACY_WEIGHT, GAUGE_CONFIG, HOLD_REGRAB_GRACE_MS } from "../constants/config";
 
@@ -34,6 +35,8 @@ export interface GameState {
   chart: Chart;
   notes: NoteRuntime[];
   score: number;
+  holdTickScore: number;
+  holdTicksEarned: number;
   combo: number;
   maxCombo: number;
   perfectStreak: number;
@@ -57,6 +60,8 @@ export function createInitialGameState(chart: Chart, options: GameOptions): Game
     chart,
     notes: createNoteRuntimes(chart),
     score: 0,
+    holdTickScore: 0,
+    holdTicksEarned: 0,
     combo: 0,
     maxCombo: 0,
     perfectStreak: 0,
@@ -123,6 +128,19 @@ function replaceNote(notes: NoteRuntime[], updated: NoteRuntime): NoteRuntime[] 
   return copy;
 }
 
+function accrueHoldTicks(state: GameState, time: number, onlyIndex?: number): GameState {
+  if (state.chart.scoringVersion !== 2 || state.failed || state.finished) return state;
+  let next = state;
+  for (const runtime of state.notes) {
+    if (onlyIndex !== undefined && runtime.index !== onlyIndex) continue;
+    const tick = advanceHoldTicks(runtime, time);
+    if (tick.note === runtime) continue;
+    next = { ...next, notes: replaceNote(next.notes, tick.note), score: next.score + tick.score,
+      holdTickScore: next.holdTickScore + tick.score, holdTicksEarned: next.holdTicksEarned + tick.earned };
+  }
+  return next;
+}
+
 /** Tap 노트 판정 시도. 대상이 없으면 상태 변화 없이 그대로 반환한다 (허공 입력은 무페널티). */
 export function attemptTap(state: GameState, lane: Lane, currentTimeSec: number): GameState {
   if (state.failed || state.finished) return state;
@@ -154,7 +172,7 @@ export function attemptLanePress(state: GameState, lane: Lane, currentTimeSec: n
 export function attemptHoldStart(state: GameState, lane: Lane, currentTimeSec: number): GameState {
   if (state.failed || state.finished) return state;
 
-  let working = state;
+  let working = accrueHoldTicks(state, currentTimeSec);
   const released = working.notes.find(
     (n) => n.note.lane === lane && n.status === "holding" && n.note.type === "hold" && n.holdReleasedAt !== undefined
   );
@@ -195,6 +213,7 @@ export function attemptHoldStart(state: GameState, lane: Lane, currentTimeSec: n
 /** Hold 노트 유지 중 키를 뗐을 때 호출. 끝 근처면 즉시 완료, 아니면 re-grab grace를 시작한다. */
 export function attemptHoldRelease(state: GameState, lane: Lane, currentTimeSec: number): GameState {
   if (state.failed || state.finished) return state;
+  state = accrueHoldTicks(state, currentTimeSec);
 
   const holding = state.notes.find(
     (n) => n.note.lane === lane && n.status === "holding" && n.note.type === "hold"
@@ -204,8 +223,11 @@ export function attemptHoldRelease(state: GameState, lane: Lane, currentTimeSec:
   const outcome = judgeHoldRelease(holding, currentTimeSec);
 
   if (outcome === "completed") {
+    // Preserve the existing early-release allowance, including the final tolerated tick.
+    state = accrueHoldTicks(state, holding.note.time + (holding.note.type === "hold" ? holding.note.duration : 0), holding.index);
+    const currentHold = state.notes[holding.index];
     const judgement = holding.judgement ?? "Good";
-    const updatedNote: NoteRuntime = { ...holding, status: "hit", holdReleasedAt: undefined };
+    const updatedNote: NoteRuntime = { ...currentHold, status: "hit", holdReleasedAt: undefined };
     const patch = applyJudgement(state, judgement, { judgement, diffMs: null, lane, noteType: "hold", phase: "hold_complete" });
     return { ...state, ...patch, notes: replaceNote(state.notes, updatedNote) };
   }
@@ -239,7 +261,7 @@ export function attemptFlick(state: GameState, lane: Lane, currentTimeSec: numbe
 export function tick(state: GameState, currentTimeSec: number): GameState {
   if (state.finished) return state;
 
-  let next = state;
+  let next = accrueHoldTicks(state, currentTimeSec);
 
   const expired = findExpiredPendingNotes(next.notes, currentTimeSec);
   for (const n of expired) {

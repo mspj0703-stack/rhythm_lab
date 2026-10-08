@@ -28,13 +28,73 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function mutate(stores: string[], action: (tx: IDBTransaction) => void) {
-  const request = indexedDB.open("BEATDASH_DB", 3);
+  const request = indexedDB.open("BEATDASH_DB", 4);
   const db = await new Promise<IDBDatabase>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
   try { await new Promise<void>((resolve, reject) => { const tx = db.transaction(stores, "readwrite"); tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error); action(tx); }); }
   finally { db.close(); }
 }
 
 describe("v4 persisted Library regression", () => {
+  it("stores legacy, mobile and desktop variants without overwriting each other or records", async () => {
+    const legacy = await saveAnalysisToLibrary(analysis());
+    await savePlayResult(input(legacy));
+    const mobileData = analysis(); mobileData.chart.platformProfile = "mobile"; mobileData.chart.scoringVersion = 2;
+    const mobile = await saveAnalysisToLibrary(mobileData, { songId: legacy.song.id });
+    const desktopData = analysis(); desktopData.chart.platformProfile = "desktop"; desktopData.chart.scoringVersion = 2;
+    const desktop = await saveAnalysisToLibrary(desktopData, { songId: legacy.song.id });
+    expect(new Set([legacy, mobile, desktop].map(item => item.charts[0].id)).size).toBe(3);
+    expect((await getLibrarySong(legacy.song.id))?.charts).toHaveLength(3);
+    expect((await getRecordsForChart(legacy.charts[0].id))).toHaveLength(1);
+    expect(await getBestRecord(mobile.charts[0].id)).toBeNull();
+    await savePlayResult({ ...input(mobile), result: { ...result, scoringVersion: 2, holdTickScore: 15 } });
+    expect((await getRecordsForChart(mobile.charts[0].id))[0]).toMatchObject({ scoringVersion: 2, chartProfile: "mobile", holdTickScore: 15 });
+    expect(await getBestRecord(desktop.charts[0].id)).toBeNull();
+    const changed = { ...desktopData, chart: { ...desktopData.chart, notes: [{ time: 2, lane: 0 as const, type: "tap" as const }] } };
+    await saveAnalysisToLibrary(changed, { songId: legacy.song.id });
+    expect((await getBestRecord(mobile.charts[0].id))?.playCount).toBe(1);
+    expect((await getBestRecord(legacy.charts[0].id))?.playCount).toBe(1);
+  });
+  it("upgrades an actual v3 database preserving cover, media, settings and legacy best record", async () => {
+    const saved = await saveAnalysisToLibrary(analysis());
+    await savePlayResult(input(saved));
+    const legacyRecords = await getRecordsForChart(saved.charts[0].id);
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open("BEATDASH_DB", 3);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        const songs = db.createObjectStore("songs", { keyPath: "id" });
+        songs.createIndex("fingerprint", "fingerprint", { unique: true }); songs.createIndex("updatedAt", "updatedAt");
+        const charts = db.createObjectStore("charts", { keyPath: "id" });
+        charts.createIndex("songId", "songId"); charts.createIndex("songDifficulty", ["songId", "difficulty"], { unique: true });
+        const records = db.createObjectStore("playRecords", { keyPath: "id" });
+        records.createIndex("songId", "songId"); records.createIndex("chartId", "chartId"); records.createIndex("playedAt", "playedAt");
+        const settings = db.createObjectStore("settings", { keyPath: "key" });
+        songs.put({ ...saved.song, customCover: "data:image/png;base64,cover", timingOffsetMs: 41 });
+        const oldChart = { ...saved.charts[0] }; delete oldChart.variantKey;
+        charts.put(oldChart);
+        for (const item of legacyRecords) { const oldRecord = { ...item }; delete oldRecord.scoringVersion; records.put(oldRecord); }
+        settings.put({ key: "test-setting", value: 9 });
+      };
+      req.onsuccess = () => { req.result.close(); resolve(); }; req.onerror = () => reject(req.error);
+    });
+    const migrated = await getLibrarySong(saved.song.id);
+    expect(migrated?.charts[0]).toMatchObject({ id: saved.charts[0].id, variantKey: "normal:legacy", chartVersion: 1 });
+    expect(migrated?.charts[0].chart).toEqual(saved.charts[0].chart);
+    expect(migrated?.song.mediaBlob?.size).toBe(saved.song.mediaBlob?.size);
+    expect(migrated?.song.customCover).toContain("cover"); expect(migrated?.song.timingOffsetMs).toBe(41);
+    expect((await getBestRecord(saved.charts[0].id))?.bestScore).toBe(result.score);
+    await mutate(["settings"], tx => { const req = tx.objectStore("settings").get("test-setting"); req.onsuccess = () => expect(req.result.value).toBe(9); });
+    const next = analysis(); next.chart.platformProfile = "desktop"; next.chart.scoringVersion = 2;
+    await saveAnalysisToLibrary(next, { songId: saved.song.id });
+    expect((await getLibrarySong(saved.song.id))?.charts).toHaveLength(2);
+  });
+  it("rejects mismatched scoring rules instead of mixing best records", async () => {
+    const source = analysis(); source.chart.platformProfile = "desktop"; source.chart.scoringVersion = 2;
+    const saved = await saveAnalysisToLibrary(source);
+    await expect(savePlayResult({ ...input(saved), result: { ...result, scoringVersion: 1 } })).rejects.toThrow("점수");
+    expect(await getRecordsForChart(saved.charts[0].id)).toHaveLength(0);
+  });
   it("upgrades a real v1 database and retains blobs, charts, records, edited title and offsets", async () => {
     const saved = await saveAnalysisToLibrary(analysis());
     await savePlayResult(input(saved));

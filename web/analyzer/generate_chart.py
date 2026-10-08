@@ -28,6 +28,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--output", "-o", default=None, help="출력 chart JSON 경로 (기본: <입력이름>.<난이도>.json)")
     p.add_argument("--seed", type=int, default=0, help="레인 패턴 재현용 seed (기본 0)")
     p.add_argument("--title", default=None)
+    p.add_argument("--platform", choices=["mobile", "desktop"], default="mobile")
     p.add_argument("--report", default=None, help="분석 리포트 JSON 저장 경로")
     p.add_argument("--dump-analysis", default=None, help="Audio Features + Musical Events 중간 결과 JSON 저장 경로")
     return p.parse_args(argv)
@@ -36,7 +37,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        result = generate_chart(args.input, args.difficulty, args.seed, args.title)
+        result = generate_chart(args.input, args.difficulty, args.seed, args.title, args.platform)
     except ChartGenError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2

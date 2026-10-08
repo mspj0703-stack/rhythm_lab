@@ -3,6 +3,7 @@ import type { AnalysisResponse } from "../../web/types";
 import { artworkForSong } from "../../library/db";
 import type { LibraryBundle } from "../../library/types";
 import appVersion from "../../../VERSION?raw";
+import { NoticePanel } from "./NoticePanel";
 
 interface Props {
   library: LibraryBundle[];
@@ -28,6 +29,7 @@ export function HomeScreen({ library, onOpenLibrary, onAddSong, onOpenSong, onSe
         <button className="icon-action" onClick={onSettings} aria-label="설정">⚙</button>
       </header>
 
+      <NoticePanel />
       <YouTubeEntry onComplete={onComplete}/>
       <div className="home-shortcuts"><button onClick={onOpenLibrary}>Library 열기</button><button onClick={onAddSong}>새 곡 추가 · 파일</button></div>
 

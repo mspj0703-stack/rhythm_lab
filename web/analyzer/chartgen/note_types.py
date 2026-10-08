@@ -209,11 +209,12 @@ def _assign_flicks(notes: list[PlannedNote], features: AudioFeatures, cfg: Diffi
 
 
 def assign_note_types(
-    notes: list[PlannedNote], features: AudioFeatures, cfg: DifficultyConfig
+    notes: list[PlannedNote], features: AudioFeatures, cfg: DifficultyConfig, platform: str = "mobile"
 ) -> tuple[list[PlannedNote], NoteTypeStats]:
     """Timing/lane을 보존한 채 일부 tap을 hold/flick으로 변환한다."""
     out = [n.copy() for n in notes]
     stats = NoteTypeStats()
     _assign_holds(out, features, cfg, stats)
-    _assign_flicks(out, features, cfg, stats)
+    if platform == "mobile":
+        _assign_flicks(out, features, cfg, stats)
     return out, stats
