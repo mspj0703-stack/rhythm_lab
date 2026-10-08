@@ -16,3 +16,7 @@ android/**/build/
 
 web/review-output/
 web/.ruff_cache/
+
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/tauri.version.conf.json
