@@ -28,14 +28,30 @@ export function YouTubeEntry({ onComplete }: { onComplete: (value: AnalysisRespo
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim(), difficulty, seed: 42 }), signal: abort.signal,
       });
-      if (!response.ok) throw new Error("request failed");
-      const data = await response.json();
+     const data = await response.json().catch(() => ({}));
+
+if (!response.ok) {
+  throw new Error(
+    typeof data.detail === "string"
+      ? data.detail
+      : `요청 실패 (${response.status})`
+  );
+}
       if (abort.signal.aborted || !mounted.current) return;
       if (generate) onComplete({ ...(data as AnalysisResponse), originalTitle: preview?.title, originalThumbnailUrl: preview?.thumbnail });
       else setPreview(data as VideoPreview);
-    } catch {
-      if (!abort.signal.aborted && mounted.current) setError(generate ? "채보를 만들지 못했습니다. 연결을 확인하고 다시 시도해 주세요. YouTube 접근 제한 시 Android 앱이나 파일 추가를 이용해 주세요." : "영상을 불러올 수 없습니다. 링크와 연결 상태를 확인해 주세요.");
-    } finally { if (!abort.signal.aborted && mounted.current) setStage(null); }
+    } catch (e) {
+  if (!abort.signal.aborted && mounted.current) {
+    const message =
+      e instanceof Error ? e.message : "알 수 없는 오류";
+
+    setError(
+      generate
+        ? `채보 생성 실패: ${message}`
+        : `영상 불러오기 실패: ${message}`
+    );
+  }
+} finally { if (!abort.signal.aborted && mounted.current) setStage(null); }
   }
   return <section className="youtube-entry" aria-label="YouTube로 시작">
     <h2>YouTube 링크로 플레이</h2><p>링크 입력 → 영상 확인 → 채보 만들기 → 플레이</p>
