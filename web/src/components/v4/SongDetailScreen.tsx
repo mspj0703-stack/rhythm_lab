@@ -5,6 +5,9 @@ import { hasNativeArtworkPicker, requestNativeArtwork } from "../../library/nati
 import { loadAudioSettings, playNoticeSfx } from "../../audio/sfx";
 import { normalizeTimingOffsetMs } from "../../settings/timingOffset";
 import type { BestRecord, LibraryBundle, LibraryChart, PlayRecord } from "../../library/types";
+import { DIFFICULTIES, type ChartPlatform } from "../../types/chart";
+import { defaultChartPlatform } from "../../platform/runtime";
+import { ChartPlatformSelect } from "../ChartPlatformSelect";
 
 interface Props {
   bundle: LibraryBundle;
@@ -12,10 +15,9 @@ interface Props {
   onPlay: (chart: LibraryChart) => void;
   onDelete: () => void;
   onChanged: () => void;
-  onGenerateDifficulty: (difficulty: string) => Promise<void>;
+  onGenerateDifficulty: (difficulty: string, platform?: ChartPlatform) => Promise<void>;
 }
 
-const DIFFICULTIES = ["easy", "normal", "hard", "expert"] as const;
 
 function statusLabel(record: BestRecord | null | undefined): string {
   if (!record) return "NO RECORD";
@@ -37,8 +39,9 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
   const [records, setRecords] = useState<PlayRecord[]>([]);
   const [coverBusy, setCoverBusy] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
+  const [platform, setPlatform] = useState(defaultChartPlatform);
   const selected = useMemo(() => bundle.charts.find((chart) => chart.id === selectedId) ?? bundle.charts[0], [bundle.charts, selectedId]);
-  const existingDifficulties = useMemo(() => new Set(bundle.charts.map((chart) => chart.difficulty.toLowerCase())), [bundle.charts]);
+  const existingDifficulties = useMemo(() => new Set(bundle.charts.filter(chart => chart.chart.platformProfile === platform).map((chart) => chart.difficulty.toLowerCase())), [bundle.charts, platform]);
   const missingDifficulties = DIFFICULTIES.filter((difficulty) => !existingDifficulties.has(difficulty));
 
   useEffect(() => {
@@ -64,10 +67,10 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
   async function restoreOriginalCover() { if (coverBusy) return; try { setError(null); await updateSongCustomCover(bundle.song.id, undefined); onChanged(); } catch (error) { setError((error as Error).message); } }
   async function saveTitle() { try { setError(null); await updateSongTitle(bundle.song.id, title); onChanged(); } catch (error) { setError((error as Error).message); } }
   async function saveOffset(value: number) { const next = normalizeTimingOffsetMs(value); setOffset(next); try { setError(null); await updateSongOffset(bundle.song.id, next); onChanged(); } catch (error) { setError((error as Error).message); } }
-  async function generate(difficulty: string) {
+  async function generate(difficulty: string, profile: ChartPlatform = platform) {
     if (generating) return;
     setGenerating(difficulty);
-    try { setError(null); await onGenerateDifficulty(difficulty); playNoticeSfx(loadAudioSettings(), "complete"); }
+    try { setError(null); await onGenerateDifficulty(difficulty, profile); playNoticeSfx(loadAudioSettings(), "complete"); }
     catch (error) { playNoticeSfx(loadAudioSettings(), "error"); setError((error as Error).message); }
     finally { setGenerating(null); }
   }
@@ -93,7 +96,7 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
     };
   }, [bundle.song.id, onChanged]);
 
-  const record = selected ? bests[selected.difficulty] : null;
+  const record = selected ? bests[selected.id] : null;
   return (
     <main className="v4-shell detail-page">
       <header className="v4-topbar"><button className="text-back" onClick={onBack}>← LIBRARY</button><div className="brand-lockup compact"><span className="brand-mark">B</span><strong>SONG</strong></div><span/></header>
@@ -104,7 +107,7 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
       </section>
 
       <section className="difficulty-select">
-        {bundle.charts.map((chart) => <button key={chart.id} className={selected?.id === chart.id ? "selected" : ""} onClick={() => setSelectedId(chart.id)}><small>{chart.difficulty.toUpperCase()}</small><strong>Lv.{chart.level}</strong><span>{statusLabel(bests[chart.difficulty])}</span></button>)}
+        {bundle.charts.slice().sort((a, b) => DIFFICULTIES.indexOf(a.difficulty.toLowerCase() as typeof DIFFICULTIES[number]) - DIFFICULTIES.indexOf(b.difficulty.toLowerCase() as typeof DIFFICULTIES[number])).map((chart) => <button key={chart.id} className={selected?.id === chart.id ? "selected" : ""} onClick={() => setSelectedId(chart.id)}><small>{chart.difficulty.toUpperCase()} · {chart.chart.platformProfile ?? "legacy"}</small><strong>Lv.{chart.level}</strong><span>{statusLabel(bests[chart.id])}</span></button>)}
       </section>
 
       {selected && <section className="record-panel">
@@ -117,8 +120,9 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
 
       <section className="song-settings-panel"><div><span className="eyebrow">SONG OFFSET</span><h2>{offset > 0 ? "+" : ""}{offset} ms</h2><p>이 곡의 보정값을 전역 Offset에 더합니다. 최종 적용 범위는 −300~+300 ms입니다.</p></div><div className="song-offset-controls"><button onClick={() => void saveOffset(offset - 10)}>−10</button><input type="range" min={-300} max={300} step={1} value={offset} onChange={(e) => setOffset(Number(e.target.value))} onPointerUp={() => void saveOffset(offset)} onKeyUp={() => void saveOffset(offset)}/><button onClick={() => void saveOffset(offset + 10)}>+10</button><button className="reset-offset" onClick={() => void saveOffset(0)}>RESET</button></div></section>
 
+      <ChartPlatformSelect value={platform} onChange={setPlatform} disabled={Boolean(generating)} />
       {missingDifficulties.length > 0 && <section className="chart-generator-panel"><div><span className="eyebrow">ADD CHART</span><h2>다른 난이도 생성</h2><p>저장된 미디어를 서버로 보내 새 난이도를 생성합니다. 네트워크 연결이 필요합니다.</p></div><div>{missingDifficulties.map((difficulty) => <button key={difficulty} disabled={Boolean(generating)} onClick={() => void generate(difficulty)}>{generating === difficulty ? "GENERATING…" : `＋ ${difficulty.toUpperCase()}`}</button>)}</div></section>}
-      {selected && <section className="chart-generator-panel"><div><h2>현재 채보 재생성</h2><p>노트가 바뀌면 새 채보 버전으로 기록을 시작합니다. 이전 기록은 보관됩니다.</p></div><button disabled={Boolean(generating)} onClick={() => { if (window.confirm("현재 난이도를 다시 생성할까요?")) void generate(selected.difficulty); }}>{generating === selected.difficulty ? "GENERATING…" : "REGENERATE"}</button></section>}
+      {selected && <section className="chart-generator-panel"><div><h2>현재 채보 재생성</h2><p>노트가 바뀌면 새 채보 버전으로 기록을 시작합니다. 이전 기록은 보관됩니다. 기존 채보는 선택한 플랫폼의 새 채보로 생성합니다.</p></div><button disabled={Boolean(generating)} onClick={() => { if (window.confirm("현재 난이도를 다시 생성할까요?")) void generate(selected.difficulty, selected.chart.platformProfile ?? platform); }}>{generating === selected.difficulty ? "GENERATING…" : "REGENERATE"}</button></section>}
       <section className="danger-zone"><button onClick={onDelete}>이 곡을 Library에서 삭제</button></section>
     </main>
   );

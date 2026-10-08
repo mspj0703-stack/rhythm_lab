@@ -24,6 +24,7 @@ ANALYZER = ROOT / "analyzer"
 sys.path.insert(0, str(ANALYZER))
 
 from chartgen.errors import ChartGenError
+from chartgen.config import DIFFICULTIES
 from chartgen.pipeline import generate_chart
 
 RUNTIME = ROOT / ".runtime"
@@ -41,7 +42,6 @@ ANALYZE_CONCURRENCY = max(1, int(os.getenv("ANALYZE_CONCURRENCY", "1")))
 YTDLP_POT_PROVIDER_URL = os.getenv("YTDLP_POT_PROVIDER_URL", "").strip().rstrip("/")
 ANALYZE_SEMAPHORE = asyncio.Semaphore(ANALYZE_CONCURRENCY)
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".webm", ".mp4"}
-DIFFICULTIES = {"easy", "normal", "hard", "expert"}
 
 APP_VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 if not APP_VERSION:
@@ -61,6 +61,7 @@ class YoutubeAnalyzePayload(BaseModel):
     url: str = Field(min_length=10, max_length=500)
     difficulty: str = Field(default="hard", max_length=16)
     seed: int = 42
+    platform: str = Field(default="mobile", max_length=16)
 
 
 def _validate_youtube_url(raw_url: str) -> str:
@@ -271,10 +272,13 @@ async def analyze(
     file: UploadFile = File(...),  # noqa: B008 - FastAPI dependency declaration
     difficulty: str = Form("hard"),
     seed: int = Form(42),
+    platform: str = Form("mobile"),
 ) -> dict:
+    if platform not in {"mobile", "desktop"}:
+        raise HTTPException(status_code=400, detail="플랫폼은 mobile/desktop 중 하나여야 합니다.")
     difficulty = difficulty.strip().lower()
     if difficulty not in DIFFICULTIES:
-        raise HTTPException(status_code=400, detail="난이도는 easy/normal/hard/expert 중 하나여야 합니다.")
+        raise HTTPException(status_code=400, detail="난이도는 easy/normal/hard/expert/extreme 중 하나여야 합니다.")
     if seed < -2_147_483_648 or seed > 2_147_483_647:
         raise HTTPException(status_code=400, detail="seed 범위가 너무 큽니다.")
 
@@ -295,7 +299,7 @@ async def analyze(
 
     try:
         async with ANALYZE_SEMAPHORE:
-            result = await run_in_threadpool(generate_chart, str(stored), difficulty, seed, title)
+            result = await run_in_threadpool(generate_chart, str(stored), difficulty, seed, title, platform)
     except ChartGenError as exc:
         stored.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -307,9 +311,11 @@ async def analyze(
 
 @app.post("/api/analyze-youtube")
 async def analyze_youtube(payload: YoutubeAnalyzePayload) -> dict:
+    if payload.platform not in {"mobile", "desktop"}:
+        raise HTTPException(status_code=400, detail="플랫폼은 mobile/desktop 중 하나여야 합니다.")
     difficulty = payload.difficulty.strip().lower()
     if difficulty not in DIFFICULTIES:
-        raise HTTPException(status_code=400, detail="난이도는 easy/normal/hard/expert 중 하나여야 합니다.")
+        raise HTTPException(status_code=400, detail="난이도는 easy/normal/hard/expert/extreme 중 하나여야 합니다.")
     if payload.seed < -2_147_483_648 or payload.seed > 2_147_483_647:
         raise HTTPException(status_code=400, detail="seed 범위가 너무 큽니다.")
     url = _validate_youtube_url(payload.url)
@@ -322,7 +328,7 @@ async def analyze_youtube(payload: YoutubeAnalyzePayload) -> dict:
             duration = _probe_duration(stored)
             if duration is not None and duration > MAX_AUDIO_DURATION_SEC:
                 raise HTTPException(status_code=413, detail=f"미디어가 너무 깁니다. 최대 {MAX_AUDIO_DURATION_SEC / 60:.0f}분까지 분석할 수 있습니다.")
-            result = await run_in_threadpool(generate_chart, str(stored), difficulty, payload.seed, title)
+            result = await run_in_threadpool(generate_chart, str(stored), difficulty, payload.seed, title, payload.platform)
     except HTTPException:
         if stored: stored.unlink(missing_ok=True)
         raise

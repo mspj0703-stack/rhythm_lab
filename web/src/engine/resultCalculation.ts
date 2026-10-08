@@ -1,9 +1,14 @@
 import type { GameState } from "./gameState";
 import { calculateAccuracyPercent } from "./gameState";
+import type { ChartPlatform } from "../types/chart";
 
 export type ResultRank = "SSS" | "SS" | "S" | "A" | "B" | "C";
 
 export interface GameResult {
+  scoringVersion?: 1 | 2;
+  chartProfile?: ChartPlatform;
+  holdTickScore?: number;
+  holdTicksEarned?: number;
   score: number;
   accuracyPercent: number;
   maxCombo: number;
@@ -26,6 +31,10 @@ export function calculateResultRank(accuracyPercent: number): ResultRank {
 export function computeResult(state: GameState): GameResult {
   const accuracyPercent = Math.round(calculateAccuracyPercent(state) * 100) / 100;
   return {
+    scoringVersion: state.chart.scoringVersion ?? 1,
+    chartProfile: state.chart.platformProfile,
+    holdTickScore: Math.round(state.holdTickScore),
+    holdTicksEarned: state.holdTicksEarned,
     score: Math.round(state.score),
     accuracyPercent,
     maxCombo: state.maxCombo,

@@ -3,7 +3,9 @@ import { loadAudioSettings, playNoticeSfx } from "../audio/sfx";
 import type { AnalysisResponse } from "./types";
 import appVersion from "../../VERSION?raw";
 
-const DIFFICULTIES = ["easy", "normal", "hard", "expert"] as const;
+import { DIFFICULTIES } from "../types/chart";
+import { defaultChartPlatform } from "../platform/runtime";
+import { ChartPlatformSelect } from "../components/ChartPlatformSelect";
 
 interface Props { onComplete: (result: AnalysisResponse) => void; onBack?: () => void; }
 function formatMb(bytes: number) { return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
@@ -12,6 +14,7 @@ export function UploadScreen({ onComplete, onBack }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [difficulty, setDifficulty] = useState<(typeof DIFFICULTIES)[number]>("hard");
   const [seed, setSeed] = useState(42);
+  const [platform, setPlatform] = useState(defaultChartPlatform);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const accept = useMemo(() => ".wav,.mp3,.flac,.ogg,.m4a,.aac,.webm,.mp4,audio/*,video/mp4", []);
@@ -22,6 +25,7 @@ export function UploadScreen({ onComplete, onBack }: Props) {
     try {
       const form = new FormData();
       form.append("file", file); form.append("difficulty", difficulty); form.append("seed", String(seed));
+      form.append("platform", platform);
       const res = await fetch("/api/analyze", { method: "POST", body: form });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(payload.detail || `분석 실패 (${res.status})`);
@@ -51,6 +55,7 @@ export function UploadScreen({ onComplete, onBack }: Props) {
           {file ? <><strong>{file.name}</strong><span>{formatMb(file.size)}</span></> : <><strong>직접 파일로 테스트</strong><span>MP3 · WAV · FLAC · OGG · M4A · AAC · MP4 · WEBM / 최대 80MB</span></>}
         </label>
 
+        <ChartPlatformSelect value={platform} onChange={setPlatform} disabled={busy} />
         <div className="option-block"><span className="option-label">난이도</span><div className="difficulty-grid">
           {DIFFICULTIES.map((value) => <button type="button" key={value} className={difficulty === value ? "selected" : ""} onClick={() => setDifficulty(value)} disabled={busy}>{value[0].toUpperCase() + value.slice(1)}</button>)}
         </div></div>

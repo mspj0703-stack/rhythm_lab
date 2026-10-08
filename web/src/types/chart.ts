@@ -7,6 +7,9 @@
  */
 
 export type NoteType = "tap" | "hold" | "flick";
+export type ChartPlatform = "mobile" | "desktop";
+export const DIFFICULTIES = ["easy", "normal", "hard", "expert", "extreme"] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
 
 export type JudgementLabel = "Perfect" | "Great" | "Good" | "Miss";
 
@@ -37,6 +40,10 @@ export interface FlickNote extends BaseNote {
 export type ChartNote = TapNote | HoldNote | FlickNote;
 
 export interface Chart {
+  version?: number;
+  platformProfile?: ChartPlatform;
+  /** Missing means legacy scoring; v5 tick scoring is opt-in per chart. */
+  scoringVersion?: 1 | 2;
   title: string;
   artist: string;
   bpm: number;
@@ -69,4 +76,5 @@ export interface NoteRuntime {
   holdStartedAt?: number;
   /** Hold 중 손이 잠깐 떨어진 시각. grace 안에 다시 누르면 유지가 복구된다. */
   holdReleasedAt?: number;
+  holdTicksProcessed?: number;
 }

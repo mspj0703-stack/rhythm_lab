@@ -15,6 +15,8 @@ export function validateChart(data: unknown): data is Chart {
   if (typeof c.difficulty !== "string") return false;
   if (typeof c.level !== "number") return false;
   if (!Array.isArray(c.notes)) return false;
+  if (c.platformProfile !== undefined && !["mobile", "desktop"].includes(c.platformProfile as string)) return false;
+  if (c.scoringVersion !== undefined && c.scoringVersion !== 1 && c.scoringVersion !== 2) return false;
 
   for (const n of c.notes) {
     if (typeof n !== "object" || n === null) return false;

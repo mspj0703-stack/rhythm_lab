@@ -224,7 +224,7 @@ function App() {
     setSelectedSongId(null); setSelectedBundle(null); await refreshLibrary(); setView("library");
   }
 
-  async function generateDifficulty(difficulty: string) {
+  async function generateDifficulty(difficulty: string, platform: "mobile" | "desktop" = "mobile") {
     if (!selectedBundle) return;
     let blob = selectedBundle.song.mediaBlob;
     if (!blob && selectedBundle.song.sourceUrl) {
@@ -242,6 +242,7 @@ function App() {
     const form = new FormData();
     form.append("file", file);
     form.append("difficulty", difficulty);
+    form.append("platform", platform);
     form.append("seed", "42");
     const response = await fetch("/api/analyze", { method: "POST", body: form });
     const payload = await response.json().catch(() => ({}));

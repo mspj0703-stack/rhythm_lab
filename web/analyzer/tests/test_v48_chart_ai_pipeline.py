@@ -35,4 +35,8 @@ def test_strong_beats_are_protected_and_difficulty_density_is_not_inverted():
 def test_repeated_beat_fixture_uses_pattern_repetition_without_schema_change():
     result = _generate(make_kick_120(), "hard")
     assert result.report["patternUsage"].get("repeat", 0) > 0
-    assert set(result.chart) == {"title", "artist", "bpm", "offset", "difficulty", "level", "notes"}
+    assert set(result.chart) == {"title", "artist", "bpm", "offset", "difficulty", "level", "notes",
+                                 "version", "platformProfile", "scoringVersion"}
+    assert result.chart["version"] == 5
+    assert result.chart["platformProfile"] == "mobile"
+    assert result.chart["scoringVersion"] == 2

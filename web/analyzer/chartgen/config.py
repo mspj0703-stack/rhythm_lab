@@ -79,6 +79,7 @@ DIFFICULTIES = {
     "normal": DifficultyConfig("Normal", 6, 8, 0.30, 0.16, 0.32, 5, False, 0.0),
     "hard": DifficultyConfig("Hard", 10, 16, 0.20, 0.10, 0.20, 8, True, 0.25),
     "expert": DifficultyConfig("Expert", 14, 16, 0.12, 0.07, 0.14, 12, True, 1.0),
+    "extreme": DifficultyConfig("Extreme", 18, 32, 0.09, 0.055, 0.12, 14, True, 1.0),
 }
 
 # ---------------- Pattern Generator ----------------
@@ -123,6 +124,7 @@ NOTE_TYPE_CONFIGS = {
     "Normal": NoteTypeConfig(0.05, 0.00, 1.0, 1.5, 1.0, 1.0, 0, 0),
     "Hard": NoteTypeConfig(0.09, 0.04, 0.5, 2.0, 0.66, 0.62, 0, 3),
     "Expert": NoteTypeConfig(0.12, 0.08, 0.5, 2.0, 0.58, 0.54, 1, 5),
+    "Extreme": NoteTypeConfig(0.14, 0.08, 0.5, 3.0, 0.58, 0.54, 1, 6),
 }
 
 HOLD_MIN_SALIENCE = 0.34

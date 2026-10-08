@@ -4,9 +4,10 @@ import type { GameResult } from "../engine/resultCalculation";
 import { buildRecordFeedback, getClearType, makeSongFingerprint, summarizeRecords } from "./model";
 import type { BestRecord, LibraryBundle, LibraryChart, LibrarySong, PlayRecord, RecordFeedback } from "./types";
 import { persistOriginalThumbnail } from "./artwork";
+import { defaultChartPlatform } from "../platform/runtime";
 
 const DB_NAME = "BEATDASH_DB";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const SONGS = "songs";
 const CHARTS = "charts";
 const RECORDS = "playRecords";
@@ -50,6 +51,20 @@ async function openDb(): Promise<IDBDatabase> {
         store.createIndex("playedAt", "playedAt");
       }
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: "key" });
+      if (event.oldVersion < 4 && tx) {
+        const store = tx.objectStore(CHARTS);
+        // Replace only the uniqueness constraint; retain every chart ID and record reference.
+        if (store.indexNames.contains("songDifficulty")) store.deleteIndex("songDifficulty");
+        store.createIndex("songChartVariant", ["songId", "variantKey"], { unique: true });
+        const cursor = store.openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          const chart = row.value as LibraryChart;
+          row.update({ ...chart, variantKey: chartVariantKey(chart.difficulty, chart.chart.platformProfile) });
+          row.continue();
+        };
+      }
       // v2/v3 are additive: preserve all Library data and backfill artwork metadata in place.
       if (event.oldVersion < 3 && tx && db.objectStoreNames.contains(SONGS)) {
         const store = tx.objectStore(SONGS);
@@ -97,6 +112,10 @@ async function mediaFingerprint(blob: Blob): Promise<string> {
 
 interface SaveOptions { cacheMedia?: boolean; nativeMedia?: boolean; songId?: string; }
 
+export function chartVariantKey(difficulty: string, profile?: "mobile" | "desktop"): string {
+  return `${difficulty.toLowerCase()}:${profile ?? "legacy"}`;
+}
+
 export async function saveAnalysisToLibrary(analysis: AnalysisResponse, options: SaveOptions = {}): Promise<LibraryBundle> {
   let mediaBlob: Blob | undefined;
   let fingerprint = `native:${analysis.id}`;
@@ -143,10 +162,12 @@ export async function saveAnalysisToLibrary(analysis: AnalysisResponse, options:
     };
     const difficulty = analysis.chart.difficulty.toLowerCase();
     const charts = tx.objectStore(CHARTS);
-    const oldChart = await requestToPromise(charts.index("songDifficulty").get([song.id, difficulty])) as LibraryChart | undefined;
+    const variantKey = chartVariantKey(difficulty, analysis.chart.platformProfile);
+    const oldChart = await requestToPromise(charts.index("songChartVariant").get([song.id, variantKey])) as LibraryChart | undefined;
     const sameChart = oldChart && JSON.stringify({ ...oldChart.chart, title: "" }) === JSON.stringify({ ...analysis.chart, title: "" });
     const chart: LibraryChart = {
       id: oldChart?.id ?? uuid("chart"), songId: song.id, difficulty,
+      variantKey, platformProfile: analysis.chart.platformProfile,
       level: analysis.chart.level, noteCount: analysis.chart.notes.length, chart: analysis.chart,
       generatorVersion: analysis.report.generatorVersion, seed: analysis.report.seed,
       createdAt: oldChart?.createdAt ?? now, updatedAt: now,
@@ -209,7 +230,8 @@ export async function getRecordsForChart(chartId: string): Promise<PlayRecord[]>
     const chart = await requestToPromise(tx.objectStore(CHARTS).get(chartId)) as LibraryChart | undefined;
     if (!chart) return [];
     const records = await requestToPromise(tx.objectStore(RECORDS).index("chartId").getAll(chartId)) as PlayRecord[];
-    return records.filter((record) => (record.chartVersion ?? 1) === chart.chartVersion).sort((a, b) => b.playedAt - a.playedAt);
+    return records.filter((record) => (record.chartVersion ?? 1) === chart.chartVersion &&
+      (record.scoringVersion ?? 1) === (chart.chart.scoringVersion ?? 1)).sort((a, b) => b.playedAt - a.playedAt);
   });
 }
 
@@ -227,10 +249,14 @@ export async function savePlayResult(input: {
     if (!song || !chart || chart.songId !== song.id) throw new Error("곡 또는 채보가 삭제되어 기록을 저장할 수 없습니다.");
     if (input.chartVersion !== undefined && input.chartVersion !== chart.chartVersion) throw new Error("채보가 변경되어 기록을 저장할 수 없습니다.");
     const records = await requestToPromise(tx.objectStore(RECORDS).index("chartId").getAll(chart.id)) as PlayRecord[];
-    const previous = summarizeRecords(records.filter((record) => (record.chartVersion ?? 1) === chart.chartVersion));
+    const scoringVersion = input.result.scoringVersion ?? chart.chart.scoringVersion ?? 1;
+    if (scoringVersion !== (chart.chart.scoringVersion ?? 1)) throw new Error("점수 규칙이 변경되어 기록을 저장할 수 없습니다.");
+    const previous = summarizeRecords(records.filter((record) => (record.chartVersion ?? 1) === chart.chartVersion && (record.scoringVersion ?? 1) === scoringVersion));
     const feedback = buildRecordFeedback(previous, input.result);
     const record: PlayRecord = {
       id: uuid("play"), songId: song.id, chartId: chart.id, chartVersion: chart.chartVersion,
+      scoringVersion, platform: defaultChartPlatform(), chartProfile: chart.chart.platformProfile,
+      holdTickScore: input.result.holdTickScore ?? 0,
       difficulty: chart.difficulty, playedAt: Date.now(), score: input.result.score,
       accuracy: input.result.accuracyPercent, maxCombo: input.result.maxCombo,
       perfect: input.result.perfect, great: input.result.great, good: input.result.good, miss: input.result.miss,
@@ -246,7 +272,7 @@ export async function savePlayResult(input: {
 export async function getBestRecordsForSong(songId: string): Promise<Record<string, BestRecord | null>> {
   const bundle = await getLibrarySong(songId);
   if (!bundle) return {};
-  const entries = await Promise.all(bundle.charts.map(async (chart) => [chart.difficulty, await getBestRecord(chart.id)] as const));
+  const entries = await Promise.all(bundle.charts.map(async (chart) => [chart.id, await getBestRecord(chart.id)] as const));
   return Object.fromEntries(entries);
 }
 
