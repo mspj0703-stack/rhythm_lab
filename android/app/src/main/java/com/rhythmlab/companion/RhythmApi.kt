@@ -10,7 +10,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 object RhythmApi {
-    const val WEB_BASE = "https://web-production-e18dd.up.railway.app"
+    val WEB_BASE: String = BuildConfig.BEATDASH_SERVICE_URL
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)

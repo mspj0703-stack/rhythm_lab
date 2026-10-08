@@ -1,0 +1,13 @@
+{
+  "name": "beatdash-desktop",
+  "private": true,
+  "version": "0.0.0-private",
+  "scripts": {
+    "version:sync": "node scripts/write-version-config.mjs",
+    "dev": "npm run version:sync && tauri dev --config src-tauri/tauri.version.conf.json",
+    "build": "npm run version:sync && tauri build --config src-tauri/tauri.version.conf.json"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

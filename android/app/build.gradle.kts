@@ -8,6 +8,9 @@ val companionPassword = System.getenv("COMPANION_KEYSTORE_PASSWORD")
 val beatdashVersion = rootProject.file("../web/VERSION").readText().trim().also {
     require(it.isNotBlank()) { "web/VERSION must not be empty" }
 }
+val beatdashServiceUrl = rootProject.file("../web/SERVICE_URL").readText().trim().removeSuffix("/").also {
+    require(it.startsWith("https://")) { "web/SERVICE_URL must be an https URL" }
+}
 val versionCore = beatdashVersion.substringBefore("-").split(".")
 require(versionCore.size == 3) { "VERSION must start with major.minor.patch" }
 val versionMajor = versionCore[0].toInt()
@@ -28,6 +31,7 @@ android {
         // Release identity comes from web/VERSION; CI run number only makes APK builds monotonic within that release.
         versionCode = beatdashVersionCode
         versionName = beatdashVersion
+        buildConfigField("String", "BEATDASH_SERVICE_URL", "\"$beatdashServiceUrl\"")
     }
 
     if (companionKeystore != null && companionPassword != null) {
@@ -50,6 +54,8 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+
+    buildFeatures { buildConfig = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
