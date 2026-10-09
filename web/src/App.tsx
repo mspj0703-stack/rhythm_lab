@@ -8,7 +8,12 @@ import { EvaluationPanel } from "./web/EvaluationPanel";
 import type { AnalysisResponse } from "./web/types";
 import { loadNoteSpeed, normalizeNoteSpeed, saveNoteSpeed } from "./settings/noteSpeed";
 import { combineTimingOffsets, loadTimingOffsetMs, normalizeTimingOffsetMs, saveTimingOffsetMs } from "./settings/timingOffset";
-import { deleteSong, getLibrarySong, listLibrary, saveAnalysisToLibrary, savePlayResult, updateSongThumbnail } from "./library/db";
+import { deleteDerivedChart, deleteSong, getLibrarySong, listLibrary, saveAnalysisToLibrary, savePlayResult, updateSongThumbnail } from "./library/db";
+import { MakerScreen } from "./maker/MakerScreen";
+import { createBlankDraft } from "./maker/blank";
+import type { ChartPlatform } from "./types/chart";
+import { CommunityScreen } from "./community/CommunityScreen";
+import { shareChart } from "./community/shareFlow";
 import { openSongMedia, useMediaHandleRelease, type SongMediaHandle } from "./library/mediaSource";
 import { deriveAudioFallbackUrls } from "./engine/mediaSources";
 import { captureThumbnail } from "./library/thumbnail";
@@ -27,10 +32,11 @@ import "./App.css";
 
 const DEFAULT_VIDEO = "/test-video.mp4";
 
-type View = "home" | "library" | "upload" | "analysis" | "detail" | "play" | "settings" | "feedback";
+type View = "home" | "library" | "upload" | "analysis" | "detail" | "play" | "settings" | "feedback" | "maker" | "community";
 
 interface Source { chartUrl: string | null; videoUrl: string; }
 interface LibraryPlay { bundle: LibraryBundle; chart: LibraryChart; media: SongMediaHandle; }
+interface MakerSession { bundle: LibraryBundle; chart: LibraryChart; media: SongMediaHandle; blank?: boolean; }
 
 function readSource(): Source {
   const params = new URLSearchParams(window.location.search);
@@ -75,6 +81,10 @@ function App() {
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
   const [selectedBundle, setSelectedBundle] = useState<LibraryBundle | null>(null);
   const [libraryPlay, setLibraryPlay] = useState<LibraryPlay | null>(null);
+  const [makerSession, setMakerSession] = useState<MakerSession | null>(null);
+  const [detailChartId, setDetailChartId] = useState<string | null>(null);
+  /** Right after analysis the song is already cached as a Blob: play that local copy, not the network URL. */
+  const [sessionMedia, setSessionMedia] = useState<SongMediaHandle | null>(null);
   const [sessionLoading, setSessionLoading] = useState(Boolean(companionSession));
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [libraryError, setLibraryError] = useState<string | null>(null);
@@ -150,6 +160,8 @@ function App() {
   // The object URL is revoked only after React has committed a screen that no longer uses it
   // (song replaced or play screen left) - never while the player may still seek, reload or fall back.
   useMediaHandleRelease(libraryPlay?.media);
+  useMediaHandleRelease(makerSession?.media);
+  useMediaHandleRelease(sessionMedia);
 
   useEffect(() => {
     if (!selectedSongId) return;
@@ -158,7 +170,12 @@ function App() {
     return () => { cancelled = true; };
   }, [selectedSongId, library]);
 
-  function nav(next: View) { if (next !== "play") setLibraryPlay(null); setView(next); }
+  function nav(next: View) {
+    if (next !== "play") { setLibraryPlay(null); setSessionMedia(null); }
+    else if (!libraryPlay && analysisBundle?.song.mediaBlob) setSessionMedia(openSongMedia(analysisBundle.song));
+    if (next !== "maker") setMakerSession(null);
+    setView(next);
+  }
   function updateNoteSpeed(value: number) { const normalized = normalizeNoteSpeed(value); setNoteSpeed(normalized); saveNoteSpeed(normalized); }
   function updateTimingOffset(value: number) { const normalized = normalizeTimingOffsetMs(value); setTimingOffsetMs(normalized); saveTimingOffsetMs(normalized); }
   function updateAudio(value: AudioSettings) { setAudioSettings(value); saveAudioSettings(value); }
@@ -191,8 +208,11 @@ function App() {
     if (companionSession) window.history.replaceState({}, "", window.location.pathname);
   }
 
-  async function openSong(songId: string) {
+  async function openSong(songId: string, chartId: string | null = null) {
     setLibraryPlay(null);
+    setMakerSession(null);
+    setSessionMedia(null);
+    setDetailChartId(chartId);
     if (selectedSongId !== songId) setSelectedBundle(null);
     setSelectedSongId(songId);
     setView("detail");
@@ -215,6 +235,44 @@ function App() {
     if (!media) { setLibraryError("이 곡의 미디어 파일을 찾을 수 없습니다. 다시 분석해 주세요."); return; }
     setLibraryPlay({ bundle, chart: currentChart, media });
     setView("play");
+  }
+
+  async function openMaker(chart: LibraryChart) {
+    if (!selectedBundle) return;
+    const bundle = await getLibrarySong(selectedBundle.song.id);
+    const current = bundle?.charts.find((item) => item.id === chart.id);
+    if (!bundle || !current) { setLibraryError("채보를 다시 선택해 주세요."); return; }
+    const media = openSongMedia(bundle.song);
+    if (!media) { setLibraryError("이 곡의 미디어 파일을 찾을 수 없어 Maker를 열 수 없습니다."); return; }
+    setLibraryPlay(null);
+    setMakerSession({ bundle, chart: current, media });
+    setView("maker");
+  }
+
+  async function openBlankMaker(difficulty: string, platform: ChartPlatform) {
+    if (!selectedBundle) return;
+    const bundle = await getLibrarySong(selectedBundle.song.id);
+    if (!bundle) { setLibraryError("곡을 다시 선택해 주세요."); return; }
+    const media = openSongMedia(bundle.song);
+    if (!media) { setLibraryError("이 곡의 미디어 파일을 찾을 수 없어 Maker를 열 수 없습니다."); return; }
+    setLibraryPlay(null);
+    setMakerSession({ bundle, chart: createBlankDraft(bundle, difficulty, platform), media, blank: true });
+    setView("maker");
+  }
+
+  async function shareSelectedChart(chart: LibraryChart, description?: string) {
+    const bundle = await getLibrarySong(chart.songId);
+    const current = bundle?.charts.find((item) => item.id === chart.id);
+    if (!bundle || !current) throw new Error("채보를 찾을 수 없습니다.");
+    await shareChart(current, bundle, description);
+    setDetailChartId(chart.id);
+    await refreshLibrary();
+  }
+
+  async function removeDerivedChart(chart: LibraryChart) {
+    await deleteDerivedChart(chart.id);
+    setDetailChartId(null);
+    await refreshLibrary();
   }
 
   async function removeSelectedSong() {
@@ -258,27 +316,32 @@ function App() {
 
   const libraryErrorBanner = libraryError ? <div className="v4-global-error" role="alert"><span>{libraryError}</span><button onClick={() => setLibraryError(null)}>×</button></div> : null;
 
-  if (view === "home") return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
-  if (view === "library") return <>{libraryErrorBanner}<LibraryScreen library={library} onBack={() => nav("home")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} /></>;
+  if (view === "community") return <>{libraryErrorBanner}<CommunityScreen library={library} onBack={() => nav("home")} onAddSong={() => nav("upload")} onImported={(songId, chart) => { void refreshLibrary().then(() => openSong(songId, chart.id)); }} /></>;
+  if (view === "maker" && makerSession) {
+    return <>{libraryErrorBanner}<MakerScreen key={makerSession.chart.id} blank={makerSession.blank} bundle={makerSession.bundle} source={makerSession.chart} media={makerSession.media} noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, makerSession.bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences}
+      onExit={() => nav("detail")} onSaved={(chart) => { setDetailChartId(chart.id); void refreshLibrary(); }} /></>;
+  }
+  if (view === "home") return <>{libraryErrorBanner}<HomeScreen library={library} onCommunity={() => nav("community")} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
+  if (view === "library") return <>{libraryErrorBanner}<LibraryScreen library={library} onCommunity={() => nav("community")} onBack={() => nav("home")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} /></>;
   if (view === "settings") return <>{libraryErrorBanner}<SettingsScreen onFeedback={() => nav("feedback")} noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} settings={audioSettings} onChange={updateAudio} preferences={preferences} onPreferences={updatePreferences} onSongSettings={() => nav("library")} onReset={resetSettings} onBack={() => nav("home")} /></>;
   if (view === "feedback") return <FeedbackScreen onBack={() => nav("settings")} screen="settings" songTitle={selectedBundle?.song.title} />;
   if (view === "upload") return <>{libraryErrorBanner}<UploadScreen onBack={() => nav("home")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
 
   if (view === "detail") {
     if (!selectedBundle) return <div className="app-loading">Library 불러오는 중...</div>;
-    return <>{libraryErrorBanner}<SongDetailScreen key={selectedBundle.song.id} bundle={selectedBundle} onBack={() => nav("library")} onPlay={(chart) => void startLibraryPlay(chart).catch((error: Error) => setLibraryError(error.message))} onDelete={() => void removeSelectedSong().catch((error: Error) => setLibraryError(error.message))} onChanged={() => void refreshLibrary()} onGenerateDifficulty={generateDifficulty} /></>;
+    return <>{libraryErrorBanner}<SongDetailScreen key={`${selectedBundle.song.id}:${detailChartId ?? ""}`} initialChartId={detailChartId ?? undefined} onCreateBlank={(difficulty, platform) => void openBlankMaker(difficulty, platform).catch((error: Error) => setLibraryError(error.message))} onEdit={(chart) => void openMaker(chart).catch((error: Error) => setLibraryError(error.message))} onShare={shareSelectedChart} onDeleteChart={removeDerivedChart} bundle={selectedBundle} onBack={() => nav("library")} onPlay={(chart) => void startLibraryPlay(chart).catch((error: Error) => setLibraryError(error.message))} onDelete={() => void removeSelectedSong().catch((error: Error) => setLibraryError(error.message))} onChanged={() => void refreshLibrary()} onGenerateDifficulty={generateDifficulty} /></>;
   }
 
   if (view === "play" && libraryPlay) {
     const { bundle, chart, media } = libraryPlay;
-    return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("detail")}>← 곡 상세</button><span>{bundle.song.title}</span><span className="companion-badge">LIBRARY</span></div><GameScreen key={`${chart.id}:${chart.chartVersion}`} chart={chart.chart} songTitle={bundle.song.title} mediaUrl={media.url} audioFallbackUrls={media.audioFallbackUrls} onRetryMedia={reacquireLibraryMedia} mediaKind={bundle.song.mediaKind} mediaMuted={false} noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => nav("detail")} onResult={(result) => savePlayResult({ songId: bundle.song.id, chartId: chart.id, chartVersion: chart.chartVersion, difficulty: chart.difficulty, result, offsetMs: combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs) }).then((feedback) => { void refreshLibrary(); return feedback; })} /></main>;
+    return <main className="play-page play-fullscreen"><GameScreen playLabel={chart.origin === "MANUAL_EDITED" ? "EDIT 채보" : chart.origin === "COMMUNITY" ? "COMMUNITY 채보" : undefined} onPreferencesChange={updatePreferences} key={`${chart.id}:${chart.chartVersion}`} chart={chart.chart} songTitle={bundle.song.title} mediaUrl={media.url} audioFallbackUrls={media.audioFallbackUrls} onRetryMedia={reacquireLibraryMedia} mediaKind={bundle.song.mediaKind} mediaMuted={false} noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => nav("detail")} onResult={(result) => savePlayResult({ songId: bundle.song.id, chartId: chart.id, chartVersion: chart.chartVersion, difficulty: chart.difficulty, result, offsetMs: combineTimingOffsets(timingOffsetMs, bundle.song.timingOffsetMs) }).then((feedback) => { void refreshLibrary(); return feedback; })} /></main>;
   }
 
   if (!analysis) return <>{libraryErrorBanner}<HomeScreen library={library} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
   if (view === "analysis") return <>{libraryErrorBanner}<AnalysisSummary data={analysis} saved={savedCompanion} onPlay={() => nav("play")} onReset={() => void resetAnalysis()} noteSpeed={noteSpeed} onNoteSpeedChange={updateNoteSpeed} timingOffsetMs={timingOffsetMs} onTimingOffsetChange={updateTimingOffset} /></>;
 
   const parsed = parseChart(JSON.stringify(analysis.chart));
-  return <main className="play-page"><div className="play-toolbar"><button onClick={() => nav("analysis")}>← 곡 설정</button><span>{analysis.originalName}</span>{analysisBundle && <span className="companion-badge">LIBRARY SAVED</span>}</div><GameScreen key={analysis.id} chart={parsed} mediaUrl={analysis.mediaUrl} audioFallbackUrls={deriveAudioFallbackUrls(analysis.mediaUrl, analysis.mediaKind)} mediaKind={analysis.mediaKind} mediaMuted={false} resultExtra={savedCompanion ? undefined : <EvaluationPanel analysisId={analysis.id} songName={analysis.chart.title} />} noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => analysisBundle ? void openSong(analysisBundle.song.id) : nav("analysis")} onResult={analysisBundle ? (result) => savePlayResult({ songId: analysisBundle.song.id, chartId: analysisBundle.charts[0].id, chartVersion: analysisBundle.charts[0].chartVersion, difficulty: analysisBundle.charts[0].difficulty, result, offsetMs: timingOffsetMs }).then((feedback) => { void refreshLibrary(); return feedback; }) : undefined} /></main>;
+  return <main className="play-page play-fullscreen"><GameScreen key={analysis.id} chart={parsed} mediaUrl={sessionMedia?.url ?? analysis.mediaUrl} audioFallbackUrls={sessionMedia?.audioFallbackUrls ?? deriveAudioFallbackUrls(analysis.mediaUrl, analysis.mediaKind)} onPreferencesChange={updatePreferences} onQuit={() => nav(analysisBundle ? "library" : "analysis")} quitLabel={analysisBundle ? "곡 리스트로 돌아가기" : "곡 설정으로 돌아가기"} mediaKind={analysis.mediaKind} mediaMuted={false} resultExtra={savedCompanion ? undefined : <EvaluationPanel analysisId={analysis.id} songName={analysis.chart.title} />} noteSpeed={noteSpeed} timingOffsetMs={timingOffsetMs} audioSettings={audioSettings} preferences={preferences} onLibrary={() => nav("library")} onSongDetail={() => analysisBundle ? void openSong(analysisBundle.song.id) : nav("analysis")} onResult={analysisBundle ? (result) => savePlayResult({ songId: analysisBundle.song.id, chartId: analysisBundle.charts[0].id, chartVersion: analysisBundle.charts[0].chartVersion, difficulty: analysisBundle.charts[0].difficulty, result, offsetMs: timingOffsetMs }).then((feedback) => { void refreshLibrary(); return feedback; }) : undefined} /></main>;
 }
 
 export default App;

@@ -1,6 +1,7 @@
 import type { AnalysisResponse } from "./types";
 import { NoteSpeedControl } from "./NoteSpeedControl";
 import { TimingOffsetControl } from "./TimingOffsetControl";
+import { difficultyLabel } from "../constants/difficulty";
 
 interface Props {
   data: AnalysisResponse;
@@ -30,7 +31,7 @@ export function AnalysisSummary({ data, saved = false, onPlay, onReset, noteSpee
           <h1>{data.chart.title}</h1>
           <p>{data.originalName}</p>
         </div>
-        <div className="difficulty-pill">{data.chart.difficulty} · Lv.{data.chart.level}</div>
+        <div className="difficulty-pill">{difficultyLabel(data.chart.difficulty)} · Lv.{data.chart.level}</div>
       </header>
 
       {!saved && <>

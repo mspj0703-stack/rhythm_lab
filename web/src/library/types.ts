@@ -26,8 +26,20 @@ export interface LibrarySong {
   lastPlayedAt?: number;
 }
 
+/**
+ * AI_GENERATED = analyzer output (protected original), MANUAL_EDITED = saved from Maker after a real edit,
+ * COMMUNITY = downloaded from Community. Only MANUAL_EDITED may be uploaded.
+ */
+export type ChartOrigin = "AI_GENERATED" | "MANUAL_EDITED" | "COMMUNITY";
+
 export interface LibraryChart {
+  /** `difficulty:platform` (Phase 1). Shared by every chart of that difficulty/platform, AI or not. */
   variantKey?: string;
+  /**
+   * v5 Phase 2 unique slot per song. The AI chart keeps `slotKey === variantKey`, so regeneration still
+   * replaces only the AI original; Maker/Community charts get their own `variantKey:origin:id` slot.
+   */
+  slotKey?: string;
   platformProfile?: ChartPlatform;
   id: string;
   songId: string;
@@ -39,10 +51,20 @@ export interface LibraryChart {
   seed?: number;
   createdAt: number;
   updatedAt: number;
-  origin: "AI_GENERATED" | "MANUAL_EDITED";
+  origin: ChartOrigin;
   chartVersion: number;
   cloudPublished: boolean;
+  /** MANUAL_EDITED: this device's anonymous author ID. COMMUNITY: the uploader's public author ID. */
   authorId?: string;
+  /** Chart this one was derived from (Maker edit of an AI/Community chart). */
+  parentChartId?: string;
+  /** Mirrors chart.chart.scoringVersion for display/queries; the chart body stays authoritative. */
+  scoringVersion?: 1 | 2;
+  /** Short user-facing name of a non-AI chart, e.g. "HARD 편집본". */
+  label?: string;
+  description?: string;
+  /** Community ID: the uploaded copy (MANUAL_EDITED) or the downloaded source (COMMUNITY). */
+  cloudChartId?: string;
 }
 
 export interface PlayRecord {

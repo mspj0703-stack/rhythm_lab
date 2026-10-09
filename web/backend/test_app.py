@@ -129,3 +129,17 @@ def test_youtube_preview_rejects_live_or_long(monkeypatch):
     for info in [{'duration': 0}, {'duration': 800}, {'duration': 60, 'is_live': True}]:
         monkeypatch.setattr(module.subprocess, 'run', lambda *a, **kw: SimpleNamespace(stdout=json.dumps(info)))
         assert client.post('/api/youtube-preview', json={'url': 'https://youtu.be/abcdefghijk'}).status_code == 422
+
+
+def test_master_is_accepted_as_extreme_for_generation():
+    for platform in ("mobile", "desktop"):
+        r = client.post(
+            "/api/analyze",
+            files={"file": ("kick.wav", wav_bytes(), "audio/wav")},
+            data={"difficulty": "MASTER", "seed": "42", "platform": platform},
+        )
+        assert r.status_code == 200, r.text
+        chart = r.json()["chart"]
+        assert chart["difficulty"].lower() == "extreme" and chart["platformProfile"] == platform
+        if platform == "desktop":
+            assert not [n for n in chart["notes"] if n["type"] == "flick"]

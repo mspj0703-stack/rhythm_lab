@@ -24,7 +24,9 @@ from chartgen.pipeline import generate_chart  # noqa: E402
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="오디오 파일에서 4키 Tap 채보(JSON)를 자동 생성합니다.")
     p.add_argument("input", help="입력 오디오 파일 (wav/flac/ogg/mp3)")
-    p.add_argument("--difficulty", "-d", default="normal", choices=list(DIFFICULTIES), type=str.lower)
+    # MASTER is the display name of the internal `extreme` difficulty (v5 Phase 2).
+    p.add_argument("--difficulty", "-d", default="normal", choices=list(DIFFICULTIES),
+                   type=lambda value: "extreme" if value.lower() == "master" else value.lower())
     p.add_argument("--output", "-o", default=None, help="출력 chart JSON 경로 (기본: <입력이름>.<난이도>.json)")
     p.add_argument("--seed", type=int, default=0, help="레인 패턴 재현용 seed (기본 0)")
     p.add_argument("--title", default=None)

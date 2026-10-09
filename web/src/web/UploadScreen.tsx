@@ -6,6 +6,7 @@ import appVersion from "../../VERSION?raw";
 import { DIFFICULTIES } from "../types/chart";
 import { defaultChartPlatform } from "../platform/runtime";
 import { ChartPlatformSelect } from "../components/ChartPlatformSelect";
+import { difficultyLabel } from "../constants/difficulty";
 
 interface Props { onComplete: (result: AnalysisResponse) => void; onBack?: () => void; }
 function formatMb(bytes: number) { return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
@@ -57,7 +58,7 @@ export function UploadScreen({ onComplete, onBack }: Props) {
 
         <ChartPlatformSelect value={platform} onChange={setPlatform} disabled={busy} />
         <div className="option-block"><span className="option-label">난이도</span><div className="difficulty-grid">
-          {DIFFICULTIES.map((value) => <button type="button" key={value} className={difficulty === value ? "selected" : ""} onClick={() => setDifficulty(value)} disabled={busy}>{value[0].toUpperCase() + value.slice(1)}</button>)}
+          {DIFFICULTIES.map((value) => <button type="button" key={value} className={difficulty === value ? "selected" : ""} onClick={() => setDifficulty(value)} disabled={busy}>{difficultyLabel(value)}</button>)}
         </div></div>
         <div className="seed-row"><label><span className="option-label">Pattern seed</span><input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value) || 0)} disabled={busy} /></label><p>같은 곡 + 같은 seed면 같은 레인 패턴이 생성됩니다.</p></div>
         {error && <div className="error-box">{error}</div>}

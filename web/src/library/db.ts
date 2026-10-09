@@ -1,13 +1,17 @@
 import { normalizeTimingOffsetMs } from "../settings/timingOffset";
 import type { AnalysisResponse } from "../web/types";
 import type { GameResult } from "../engine/resultCalculation";
-import { buildRecordFeedback, getClearType, makeSongFingerprint, summarizeRecords } from "./model";
+import { buildRecordFeedback, getClearType, isAiOriginal, makeSongFingerprint, summarizeRecords } from "./model";
 import type { BestRecord, LibraryBundle, LibraryChart, LibrarySong, PlayRecord, RecordFeedback } from "./types";
 import { persistOriginalThumbnail } from "./artwork";
 import { defaultChartPlatform } from "../platform/runtime";
+import type { Chart, ChartNote, ChartPlatform } from "../types/chart";
+import { validateChart } from "../engine/chartLoader";
+import { notesEqual } from "./chartDiff";
+import { difficultyLabel } from "../constants/difficulty";
 
 const DB_NAME = "BEATDASH_DB";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const SONGS = "songs";
 const CHARTS = "charts";
 const RECORDS = "playRecords";
@@ -51,17 +55,23 @@ async function openDb(): Promise<IDBDatabase> {
         store.createIndex("playedAt", "playedAt");
       }
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: "key" });
-      if (event.oldVersion < 4 && tx) {
+      if (event.oldVersion < 5 && tx) {
         const store = tx.objectStore(CHARTS);
-        // Replace only the uniqueness constraint; retain every chart ID and record reference.
+        // Only uniqueness constraints change; every chart ID, record reference and chart body is retained.
+        // v3: songDifficulty(unique) -> v4: songChartVariant(unique) -> v5: songChartVariant(shared) + songChartSlot(unique).
         if (store.indexNames.contains("songDifficulty")) store.deleteIndex("songDifficulty");
-        store.createIndex("songChartVariant", ["songId", "variantKey"], { unique: true });
+        if (store.indexNames.contains("songChartVariant")) store.deleteIndex("songChartVariant");
+        store.createIndex("songChartVariant", ["songId", "variantKey"], { unique: false });
+        if (!store.indexNames.contains("songChartSlot")) store.createIndex("songChartSlot", ["songId", "slotKey"], { unique: true });
+        // One cursor backfills both keys so two concurrent cursors never write stale copies of the same row.
         const cursor = store.openCursor();
         cursor.onsuccess = () => {
           const row = cursor.result;
           if (!row) return;
           const chart = row.value as LibraryChart;
-          row.update({ ...chart, variantKey: chartVariantKey(chart.difficulty, chart.chart.platformProfile) });
+          const variantKey = chart.variantKey ?? chartVariantKey(chart.difficulty, chart.chart.platformProfile);
+          // Every pre-v5 chart occupied the single (difficulty, platform) slot, so it keeps that slot.
+          row.update({ ...chart, variantKey, slotKey: chart.slotKey ?? variantKey });
           row.continue();
         };
       }
@@ -163,11 +173,14 @@ export async function saveAnalysisToLibrary(analysis: AnalysisResponse, options:
     const difficulty = analysis.chart.difficulty.toLowerCase();
     const charts = tx.objectStore(CHARTS);
     const variantKey = chartVariantKey(difficulty, analysis.chart.platformProfile);
-    const oldChart = await requestToPromise(charts.index("songChartVariant").get([song.id, variantKey])) as LibraryChart | undefined;
+    // The AI slot only: Maker edits and Community downloads of the same difficulty/platform are never replaced.
+    const oldChart = await requestToPromise(charts.index("songChartSlot").get([song.id, variantKey])) as LibraryChart | undefined;
     const sameChart = oldChart && JSON.stringify({ ...oldChart.chart, title: "" }) === JSON.stringify({ ...analysis.chart, title: "" });
     const chart: LibraryChart = {
+      ...(oldChart ?? {}),
       id: oldChart?.id ?? uuid("chart"), songId: song.id, difficulty,
-      variantKey, platformProfile: analysis.chart.platformProfile,
+      variantKey, slotKey: variantKey, platformProfile: analysis.chart.platformProfile,
+      scoringVersion: analysis.chart.scoringVersion ?? 1,
       level: analysis.chart.level, noteCount: analysis.chart.notes.length, chart: analysis.chart,
       generatorVersion: analysis.report.generatorVersion, seed: analysis.report.seed,
       createdAt: oldChart?.createdAt ?? now, updatedAt: now,
@@ -298,4 +311,177 @@ export async function updateSongCustomCover(songId: string, customCover?: string
 
 export function artworkForSong(song: LibrarySong): string | undefined {
   return song.customCover || song.originalThumbnail || song.thumbnailUrl;
+}
+
+// ===== v5 Phase 2: Maker edits and Community downloads =====
+
+function sortNotes(notes: readonly ChartNote[]): ChartNote[] {
+  return notes.map((note) => ({ ...note })).sort((a, b) => a.time - b.time || a.lane - b.lane);
+}
+
+/** Structural sanity only (playability is the validator's job): corrupt data must never reach the Library. */
+function assertStorableChart(chart: Chart): void {
+  if (!validateChart(chart)) throw new Error("채보 형식이 올바르지 않아 저장할 수 없습니다.");
+  for (const note of chart.notes) {
+    if (!Number.isFinite(note.time) || (note.type === "hold" && !(Number.isFinite(note.duration) && note.duration > 0))) {
+      throw new Error("시간 값이 올바르지 않은 노트가 있어 저장할 수 없습니다.");
+    }
+  }
+}
+
+export function labelForDifficulty(difficulty: string, suffix: string): string {
+  return `${difficultyLabel(difficulty)} ${suffix}`;
+}
+
+export interface SaveEditedChartInput {
+  songId: string;
+  /** Update this MANUAL_EDITED chart in place. */
+  chartId?: string;
+  /** Create a new MANUAL_EDITED chart derived from this chart (AI original, Community or another edit). */
+  parentChartId?: string;
+  /** Create a new MANUAL_EDITED chart from an in-memory blank draft (no parent; needs at least one note). */
+  draft?: LibraryChart;
+  notes: readonly ChartNote[];
+  authorId: string;
+  label?: string;
+}
+
+/**
+ * Saves a Maker edit without touching its source: a new edit always gets its own chart ID and slot.
+ * A note list identical to the source is refused - an untouched AI chart never becomes "human edited".
+ */
+export async function saveEditedChart(input: SaveEditedChartInput): Promise<LibraryChart> {
+  const notes = sortNotes(input.notes);
+  return transaction([SONGS, CHARTS], "readwrite", async (tx) => {
+    const songs = tx.objectStore(SONGS);
+    const charts = tx.objectStore(CHARTS);
+    const song = await requestToPromise(songs.get(input.songId)) as LibrarySong | undefined;
+    if (!song) throw new Error("곡이 삭제되었습니다. Library에서 다시 선택해 주세요.");
+    const now = Date.now();
+    if (input.chartId) {
+      const existing = await requestToPromise(charts.get(input.chartId)) as LibraryChart | undefined;
+      if (!existing || existing.songId !== song.id) throw new Error("편집 중인 채보가 삭제되었습니다.");
+      if (existing.origin !== "MANUAL_EDITED") throw new Error("AI 원본이나 다운로드 채보는 직접 덮어쓸 수 없습니다.");
+      const parent = existing.parentChartId ? await requestToPromise(charts.get(existing.parentChartId)) as LibraryChart | undefined : undefined;
+      if (parent && notesEqual(parent.chart.notes, notes)) throw new Error("원본과 같은 채보입니다. 노트를 수정한 뒤 저장해 주세요.");
+      const changed = !notesEqual(existing.chart.notes, notes);
+      const chart: Chart = { ...existing.chart, notes };
+      assertStorableChart(chart);
+      const updated: LibraryChart = {
+        ...existing, chart, noteCount: notes.length, updatedAt: changed ? now : existing.updatedAt,
+        chartVersion: existing.chartVersion + (changed ? 1 : 0),
+        // Local changes are not on the server until the author shares them again.
+        cloudPublished: changed ? false : existing.cloudPublished,
+        label: input.label?.trim() || existing.label,
+      };
+      charts.put(updated);
+      return updated;
+    }
+    if (input.draft) {
+      const draft = input.draft;
+      if (draft.songId !== song.id) throw new Error("새 채보의 곡 정보가 올바르지 않습니다.");
+      if (notes.length === 0) throw new Error("노트를 하나 이상 추가한 뒤 저장해 주세요.");
+      const id = uuid("chart");
+      const chart: Chart = { ...draft.chart, notes };
+      assertStorableChart(chart);
+      const variantKey = chartVariantKey(draft.difficulty, draft.chart.platformProfile);
+      const created: LibraryChart = {
+        id, songId: song.id, difficulty: draft.difficulty.toLowerCase(), level: draft.level,
+        variantKey, slotKey: `${variantKey}:edit:${id}`, platformProfile: draft.chart.platformProfile,
+        scoringVersion: draft.chart.scoringVersion ?? 2, noteCount: notes.length, chart,
+        generatorVersion: draft.generatorVersion, seed: draft.seed, createdAt: now, updatedAt: now,
+        origin: "MANUAL_EDITED", chartVersion: 1, cloudPublished: false, authorId: input.authorId,
+        label: input.label?.trim() || draft.label || labelForDifficulty(draft.difficulty, "새 채보"),
+      };
+      charts.put(created);
+      return created;
+    }
+    if (!input.parentChartId) throw new Error("편집할 원본 채보가 필요합니다.");
+    const parent = await requestToPromise(charts.get(input.parentChartId)) as LibraryChart | undefined;
+    if (!parent || parent.songId !== song.id) throw new Error("원본 채보가 삭제되었습니다.");
+    if (notesEqual(parent.chart.notes, notes)) throw new Error("원본과 같은 채보입니다. 노트를 수정한 뒤 저장해 주세요.");
+    const id = uuid("chart");
+    const variantKey = parent.variantKey ?? chartVariantKey(parent.difficulty, parent.chart.platformProfile);
+    const chart: Chart = { ...parent.chart, notes };
+    assertStorableChart(chart);
+    const created: LibraryChart = {
+      id, songId: song.id, difficulty: parent.difficulty.toLowerCase(), level: parent.level,
+      variantKey, slotKey: `${variantKey}:edit:${id}`, platformProfile: parent.chart.platformProfile,
+      scoringVersion: parent.chart.scoringVersion ?? 1,
+      noteCount: notes.length, chart, generatorVersion: parent.generatorVersion, seed: parent.seed,
+      createdAt: now, updatedAt: now, origin: "MANUAL_EDITED", chartVersion: 1, cloudPublished: false,
+      authorId: input.authorId, parentChartId: parent.id,
+      label: input.label?.trim() || labelForDifficulty(parent.difficulty, "편집본"),
+    };
+    charts.put(created);
+    return created;
+  });
+}
+
+export interface CommunityChartImport {
+  cloudChartId: string;
+  authorId: string;
+  title: string;
+  description?: string;
+  difficulty: string;
+  level: number;
+  platformProfile: ChartPlatform;
+  chart: Chart;
+}
+
+/** Adds a downloaded chart to an existing Library song. Re-downloading updates that copy only. */
+export async function saveCommunityChart(songId: string, item: CommunityChartImport): Promise<LibraryChart> {
+  const chart: Chart = { ...item.chart, platformProfile: item.platformProfile, notes: sortNotes(item.chart.notes) };
+  assertStorableChart(chart);
+  return transaction([SONGS, CHARTS], "readwrite", async (tx) => {
+    const song = await requestToPromise(tx.objectStore(SONGS).get(songId)) as LibrarySong | undefined;
+    if (!song) throw new Error("연결할 곡이 Library에 없습니다.");
+    const charts = tx.objectStore(CHARTS);
+    const difficulty = item.difficulty.toLowerCase();
+    const variantKey = chartVariantKey(difficulty, item.platformProfile);
+    const slotKey = `${variantKey}:community:${item.cloudChartId}`;
+    const existing = await requestToPromise(charts.index("songChartSlot").get([song.id, slotKey])) as LibraryChart | undefined;
+    const now = Date.now();
+    const changed = !existing || !notesEqual(existing.chart.notes, chart.notes);
+    const saved: LibraryChart = {
+      ...(existing ?? {}),
+      id: existing?.id ?? uuid("chart"), songId: song.id, difficulty, level: item.level,
+      variantKey, slotKey, platformProfile: item.platformProfile, scoringVersion: chart.scoringVersion ?? 1,
+      noteCount: chart.notes.length, chart: existing && !changed ? existing.chart : chart,
+      createdAt: existing?.createdAt ?? now, updatedAt: changed ? now : existing!.updatedAt,
+      origin: "COMMUNITY", chartVersion: existing ? existing.chartVersion + (changed ? 1 : 0) : 1,
+      cloudPublished: false, authorId: item.authorId, cloudChartId: item.cloudChartId,
+      label: item.title.trim() || labelForDifficulty(difficulty, "커뮤니티"), description: item.description,
+    };
+    charts.put(saved);
+    return saved;
+  });
+}
+
+export async function getChart(chartId: string): Promise<LibraryChart | null> {
+  return transaction([CHARTS], "readonly", async (tx) => (await requestToPromise(tx.objectStore(CHARTS).get(chartId)) as LibraryChart | undefined) ?? null);
+}
+
+export async function markChartPublished(chartId: string, cloudChartId: string): Promise<LibraryChart> {
+  return transaction([CHARTS], "readwrite", async (tx) => {
+    const store = tx.objectStore(CHARTS);
+    const chart = await requestToPromise(store.get(chartId)) as LibraryChart | undefined;
+    if (!chart) throw new Error("채보를 찾을 수 없습니다.");
+    if (chart.origin !== "MANUAL_EDITED") throw new Error("사람이 편집한 채보만 공유할 수 있습니다.");
+    const updated = { ...chart, cloudChartId, cloudPublished: true };
+    store.put(updated);
+    return updated;
+  });
+}
+
+/** Removes one Maker/Community chart and its own records. AI originals are never deleted here. */
+export async function deleteDerivedChart(chartId: string): Promise<void> {
+  return transaction([CHARTS, RECORDS], "readwrite", async (tx) => {
+    const chart = await requestToPromise(tx.objectStore(CHARTS).get(chartId)) as LibraryChart | undefined;
+    if (!chart) return;
+    if (isAiOriginal(chart)) throw new Error("AI 원본 채보는 삭제할 수 없습니다.");
+    const records = await requestToPromise(tx.objectStore(RECORDS).index("chartId").getAll(chartId)) as PlayRecord[];
+    tx.objectStore(CHARTS).delete(chartId);
+    for (const record of records) tx.objectStore(RECORDS).delete(record.id);
+  });
 }

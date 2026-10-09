@@ -3,6 +3,13 @@ import { getNoteFallTimeSec, GAMEPLAY_LOOKAHEAD_MULTIPLIER } from "../settings/n
 export const CANVAS_WIDTH = 640;
 export const CANVAS_HEIGHT = 560;
 export const JUDGE_LINE_Y = CANVAS_HEIGHT - 62;
+/** Share of the playfield height below the judge line (touch lanes / hit effects use the same ratio in CSS). */
+export const JUDGE_ZONE_RATIO = 62 / CANVAS_HEIGHT;
+
+/** Judge line for a playfield of any size, keeping the v3 canvas proportions so CSS overlays stay aligned. */
+export function judgeLineYFor(height: number): number {
+  return height - height * JUDGE_ZONE_RATIO;
+}
 export const TOP_WIDTH_RATIO = 0.40;
 export const BOTTOM_WIDTH_RATIO = 0.96;
 export const PERSPECTIVE_POWER = 1.62;

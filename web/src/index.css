@@ -1,3 +1,5 @@
 html { background: #08080d; }
 body { margin: 0; }
 button, a, input, textarea { box-sizing: border-box; }
+/* viewport-fit=cover (v5 Phase 2): ordinary pages keep clear of notches; the play screen handles insets itself. */
+#root { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }

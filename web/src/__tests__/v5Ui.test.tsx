@@ -25,9 +25,11 @@ it("shows bundled notices, all notices and handles an empty feed", async () => {
   expect(container.innerHTML).toBe("");
 });
 
-it("exposes EXTREME and both profiles in file upload", async () => {
+it("exposes MASTER (internal extreme) and both profiles in file upload", async () => {
   await act(async () => root.render(<UploadScreen onComplete={() => {}} />));
-  expect(container.textContent).toContain("Extreme");
+  // v5 Phase 2: the highest difficulty is displayed as MASTER; the internal value stays "extreme".
+  expect(container.textContent).toContain("MASTER");
+  expect(container.textContent).not.toContain("Extreme");
   const select = container.querySelector('select[aria-label="채보 플랫폼"]') as HTMLSelectElement;
   expect([...select.options].map(option => option.value)).toEqual(["mobile", "desktop"]);
 });

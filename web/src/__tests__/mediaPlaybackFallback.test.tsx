@@ -36,9 +36,10 @@ async function render(props: Props = {}) {
 async function fire(name: string, target: HTMLMediaElement | null = el()) {
   await act(async () => { target!.dispatchEvent(new Event(name)); });
 }
-async function ready(target: HTMLMediaElement | null = el()) { await fire("canplay", target); }
+// v5 Phase 2: readiness needs canplaythrough (or enough buffer), not a bare canplay.
+async function ready(target: HTMLMediaElement | null = el()) { await fire("canplay", target); await fire("canplaythrough", target); }
 async function countdown() {
-  await act(async () => { await vi.advanceTimersByTimeAsync(2200); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(3200); });
   await act(async () => Promise.resolve());
 }
 async function startPlaying() { await ready(); await countdown(); }
@@ -48,6 +49,11 @@ async function advance(time: number) {
 }
 async function key(type: "keydown" | "keyup", k: string) {
   await act(async () => { window.dispatchEvent(new KeyboardEvent(type, { key: k, bubbles: true, cancelable: true })); });
+}
+/** v5 Phase 2: a pre-start MV failure asks the player instead of silently switching. */
+async function chooseNoMv() {
+  expect(alertText()).toContain("MV를 불러오지 못했습니다.");
+  await click("MV 없이 플레이");
 }
 async function click(text: string) {
   const b = Array.from(container.querySelectorAll("button")).find((x) => x.textContent?.trim() === text);
@@ -86,8 +92,14 @@ describe("1. audio + video healthy", () => {
 });
 
 describe("2. audio ok + video load failure -> audio-only", () => {
-  it("falls back before the countdown without stopping the game and without a manual retry", async () => {
+  it("asks before the countdown and continues audio-only after \"MV 없이 플레이\"", async () => {
     await render(); await fire("error");
+    // The MV failure is explained with two clear choices; nothing starts on its own.
+    expect(alertText()).toContain("다시 시도");
+    expect(play).not.toHaveBeenCalled(); expect(debug().startupPhase).toBe("preparing");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(play).not.toHaveBeenCalled();
+    await chooseNoMv();
     expect(container.querySelector("video")).toBeNull();
     expect(el()!.tagName).toBe("AUDIO");
     expect(el()!.getAttribute("src")).toBe(AUDIO_URL);
@@ -99,7 +111,7 @@ describe("2. audio ok + video load failure -> audio-only", () => {
     expect(container.querySelector(".visual-options")).toBeNull();
   });
   it("keeps judgement on the audio clock and reaches the result screen", async () => {
-    await render(); await fire("error"); await startPlaying();
+    await render(); await fire("error"); await chooseNoMv(); await startPlaying();
     await advance(1); await key("keydown", "d");
     expect(debug().state.notes[0].status).toBe("hit");
     await advance(9);
@@ -125,13 +137,16 @@ describe("3. repeated video failure has no recovery loop", () => {
   it("handles each source once even when error events repeat", async () => {
     await render();
     const staleVideo = el()!;
-    await fire("error"); await fire("error", staleVideo); await fire("error", staleVideo);
+    await fire("error"); await fire("error", staleVideo);
+    expect(container.querySelectorAll(".mv-choice")).toHaveLength(1);
+    await chooseNoMv();
+    await fire("error", staleVideo); await fire("error", staleVideo);
     expect(container.querySelectorAll("audio")).toHaveLength(1);
     expect(load).not.toHaveBeenCalled();
     expect(statusText().match(/오디오 모드/g)).toHaveLength(1);
   });
   it("stops with one clear fatal message when audio also fails, then stays quiet", async () => {
-    await render(); await fire("error");           // video -> dedicated audio
+    await render(); await fire("error"); await chooseNoMv(); // video -> dedicated audio
     await fire("error");                           // dedicated audio -> same container as audio
     await fire("error");                           // nothing left
     expect(alertText()).toContain("다시 시도");
@@ -146,7 +161,7 @@ describe("5. retry re-initialises the media resource", () => {
   it("remounts a fresh element, asks the owner for a fresh URL and falls back again instead of looping", async () => {
     const onRetryMedia = vi.fn();
     await render({ audioFallbackUrls: [AUDIO_URL], onRetryMedia });
-    await fire("error"); await fire("error");
+    await fire("error"); await chooseNoMv(); await fire("error");
     expect(alertText()).toContain("다시 시도");
     const failed = el();
     await click("재생 다시 시도");
@@ -154,7 +169,9 @@ describe("5. retry re-initialises the media resource", () => {
     expect(el()).not.toBe(failed);
     expect(el()!.tagName).toBe("VIDEO");           // the stored MV is tried once more
     expect(debug().gameStarted).toBe(false); expect(alertText()).toBe("");
-    await fire("error");                           // same video fails again -> audio-only, no loop
+    await fire("error");                           // same video fails again -> the same clear choice, no loop
+    expect(load).not.toHaveBeenCalled();
+    await chooseNoMv();
     expect(el()!.tagName).toBe("AUDIO"); expect(alertText()).toBe("");
     await ready(); await countdown();
     expect(debug().gameStarted).toBe(true);
@@ -183,10 +200,11 @@ describe("6. leaving the screen", () => {
 
 describe("7. restart creates a fresh playback session", () => {
   it("keeps the working audio-only source and restarts through preparing -> countdown", async () => {
-    await render(); await fire("error"); await startPlaying(); await advance(9);
+    await render(); await fire("error"); await chooseNoMv(); await startPlaying(); await advance(9);
     await act(async () => { el()!.dispatchEvent(new Event("ended")); });
     await act(async () => { await vi.advanceTimersByTimeAsync(650); });
     await click("RETRY");
+    // The result screen unmounted the element, so the new one prepares again before 3-2-1.
     expect(debug().gameStarted).toBe(false); expect(debug().startupPhase).toBe("preparing");
     expect(el()!.tagName).toBe("AUDIO"); expect(container.querySelector("video")).toBeNull();
     expect(play).toHaveBeenCalledTimes(1);

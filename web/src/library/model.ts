@@ -53,3 +53,8 @@ export function makeSongFingerprint(originalName: string, durationSec: number, b
   const normalized = originalName.trim().toLocaleLowerCase().replace(/\s+/g, " ");
   return `v1:${normalized}:${Math.round(durationSec * 10)}:${Math.round(bpm * 10)}`;
 }
+
+/** Charts saved before `origin` existed are analyzer output; treat a missing origin as the AI original. */
+export function isAiOriginal(chart: { origin?: string }): boolean {
+  return (chart.origin ?? "AI_GENERATED") === "AI_GENERATED";
+}

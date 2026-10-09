@@ -2,12 +2,15 @@ import { useEffect, useRef } from "react";
 import type { NoteRuntime } from "../types/chart";
 import { projection, laneGeometry, TOP_WIDTH_RATIO, BOTTOM_WIDTH_RATIO } from "../engine/highway";
 
-interface Props { notes: NoteRuntime[]; currentTimeSec: number; width: number; height: number; judgeLineY: number; laneCount: number; noteSpeed: number; }
+interface Props { notes: NoteRuntime[]; currentTimeSec: number; width: number; height: number; judgeLineY: number; laneCount: number; noteSpeed: number;
+  /** Backing-store scale (devicePixelRatio). Drawing stays in CSS pixels. */
+  pixelRatio?: number; }
 const LANE_COLORS = ["#8f82ff", "#4ce0b1", "#ff845e", "#ff6ca5"];
 function roundedRect(ctx: CanvasRenderingContext2D, x:number,y:number,w:number,h:number,r:number){const rr=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+rr,y);ctx.lineTo(x+w-rr,y);ctx.quadraticCurveTo(x+w,y,x+w,y+rr);ctx.lineTo(x+w,y+h-rr);ctx.quadraticCurveTo(x+w,y+h,x+w-rr,y+h);ctx.lineTo(x+rr,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-rr);ctx.lineTo(x,y+rr);ctx.quadraticCurveTo(x,y,x+rr,y);ctx.closePath();ctx.fill();}
-export function NoteFieldCanvas({notes,currentTimeSec,width,height,judgeLineY,laneCount,noteSpeed}:Props){
+export function NoteFieldCanvas({notes,currentTimeSec,width,height,judgeLineY,laneCount,noteSpeed,pixelRatio=1}:Props){
  const canvasRef=useRef<HTMLCanvasElement|null>(null);
- useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const ctx=canvas.getContext("2d");if(!ctx)return;ctx.clearRect(0,0,width,height);
+ const ratio=Math.max(1,Math.min(2,Number.isFinite(pixelRatio)?pixelRatio:1));
+ useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const ctx=canvas.getContext("2d");if(!ctx)return;ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,width,height);
   const topW=width*TOP_WIDTH_RATIO,bottomW=width*BOTTOM_WIDTH_RATIO,topL=(width-topW)/2,bottomL=(width-bottomW)/2;
   const road=ctx.createLinearGradient(0,0,0,judgeLineY);road.addColorStop(0,"rgba(8,7,18,.38)");road.addColorStop(1,"rgba(3,3,8,.72)");ctx.fillStyle=road;ctx.beginPath();ctx.moveTo(topL,0);ctx.lineTo(topL+topW,0);ctx.lineTo(bottomL+bottomW,judgeLineY);ctx.lineTo(bottomL,judgeLineY);ctx.closePath();ctx.fill();
   ctx.strokeStyle="rgba(255,255,255,.14)";ctx.lineWidth=1;for(let i=0;i<=laneCount;i++){ctx.beginPath();ctx.moveTo(topL+topW*i/laneCount,0);ctx.lineTo(bottomL+bottomW*i/laneCount,judgeLineY);ctx.stroke();}
@@ -18,6 +21,6 @@ export function NoteFieldCanvas({notes,currentTimeSec,width,height,judgeLineY,la
     if(n.note.type==="flick"){const cx=x+nw/2,arrow=Math.max(20,32*head.scale/.96);ctx.fillStyle="rgba(255,255,255,.98)";ctx.shadowBlur=28;ctx.beginPath();ctx.moveTo(cx,head.y-arrow*1.35);ctx.lineTo(cx-arrow*.72,head.y-arrow*.28);ctx.lineTo(cx-arrow*.28,head.y-arrow*.28);ctx.lineTo(cx-arrow*.28,head.y+arrow*.42);ctx.lineTo(cx+arrow*.28,head.y+arrow*.42);ctx.lineTo(cx+arrow*.28,head.y-arrow*.28);ctx.lineTo(cx+arrow*.72,head.y-arrow*.28);ctx.closePath();ctx.fill();ctx.strokeStyle=color;ctx.lineWidth=Math.max(2,4*head.scale/.96);ctx.stroke();}
    }ctx.shadowBlur=0;
   }
- },[notes,currentTimeSec,width,height,judgeLineY,laneCount,noteSpeed]);
- return <canvas ref={canvasRef} width={width} height={height} style={{display:"block",width:"100%",height:"100%"}}/>;
+ },[notes,currentTimeSec,width,height,judgeLineY,laneCount,noteSpeed,ratio]);
+ return <canvas ref={canvasRef} width={Math.round(width*ratio)} height={Math.round(height*ratio)} style={{display:"block",width:"100%",height:"100%"}}/>;
 }
