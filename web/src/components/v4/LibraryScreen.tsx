@@ -2,12 +2,14 @@ import { artworkForSong } from "../../library/db";
 import { useEffect, useMemo, useState } from "react";
 import { getBestRecordsForSong } from "../../library/db";
 import type { BestRecord, LibraryBundle } from "../../library/types";
+import { difficultyShort } from "../../constants/difficulty";
 
 interface Props {
   library: LibraryBundle[];
   onBack: () => void;
   onAddSong: () => void;
   onOpenSong: (songId: string) => void;
+  onCommunity?: () => void;
 }
 
 type SortMode = "recent" | "added" | "title";
@@ -19,7 +21,7 @@ function clearBadge(record: BestRecord | null | undefined): string {
   return "CL";
 }
 
-export function LibraryScreen({ library, onBack, onAddSong, onOpenSong }: Props) {
+export function LibraryScreen({ library, onBack, onAddSong, onOpenSong, onCommunity }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortMode>("recent");
@@ -46,7 +48,7 @@ export function LibraryScreen({ library, onBack, onAddSong, onOpenSong }: Props)
     <main className="v4-shell library-page">
       <header className="v4-topbar"><button className="text-back" onClick={onBack}>← HOME</button><div className="brand-lockup compact"><span className="brand-mark">B</span><strong>LIBRARY</strong></div><button className="small-primary" onClick={onAddSong}>＋ ADD</button></header>
       {error && <p role="alert">{error}</p>}
-      <section className="library-title"><div><span className="eyebrow">LOCAL COLLECTION</span><h1>Library</h1><p>{library.length}곡 저장됨</p></div></section>
+      <section className="library-title"><div><span className="eyebrow">LOCAL COLLECTION</span><h1>Library</h1><p>{library.length}곡 저장됨</p></div>{onCommunity && <button className="small-primary" onClick={onCommunity}>COMMUNITY</button>}</section>
       <section className="library-tools"><input aria-label="곡 검색" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="곡 제목 검색"/><select value={sort} onChange={(e) => setSort(e.target.value as SortMode)}><option value="recent">최근 플레이</option><option value="added">최근 추가</option><option value="title">제목순</option></select></section>
 
       {visible.length === 0 ? <section className="empty-library"><strong>조건에 맞는 곡이 없습니다.</strong><span>새 곡을 추가하거나 검색어를 바꿔보세요.</span></section> : (
@@ -56,7 +58,7 @@ export function LibraryScreen({ library, onBack, onAddSong, onOpenSong }: Props)
               <div className="library-art">{artworkForSong(song) ? <img src={artworkForSong(song)} alt=""/> : <span>{song.mediaKind === "video" ? "MV" : "♪"}</span>}</div>
               <div className="library-main"><strong>{song.title}</strong><span>{song.bpm.toFixed(1)} BPM · {Math.round(song.durationSec)}s</span></div>
               <div className="library-difficulties">
-                {charts.slice().sort((a,b) => a.level-b.level).map((chart) => <span key={chart.id}><small>{chart.difficulty.slice(0,3).toUpperCase()} · {chart.chart.platformProfile === "desktop" ? "PC" : chart.chart.platformProfile === "mobile" ? "M" : "LEG"}</small><b className={`clear-${clearBadge(bests[song.id]?.[chart.id]).toLowerCase()}`}>{clearBadge(bests[song.id]?.[chart.id])}</b></span>)}
+                {charts.slice().sort((a,b) => a.level-b.level).map((chart) => <span key={chart.id}><small>{difficultyShort(chart.difficulty)} · {chart.chart.platformProfile === "desktop" ? "PC" : chart.chart.platformProfile === "mobile" ? "M" : "LEG"}</small><b className={`clear-${clearBadge(bests[song.id]?.[chart.id]).toLowerCase()}`}>{clearBadge(bests[song.id]?.[chart.id])}</b></span>)}
               </div>
               <span className="row-arrow">›</span>
             </button>

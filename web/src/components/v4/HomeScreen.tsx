@@ -12,6 +12,7 @@ interface Props {
   onAddSong: () => void;
   onOpenSong: (songId: string) => void;
   onSettings: () => void;
+  onCommunity?: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -20,7 +21,7 @@ function formatDuration(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-export function HomeScreen({ library, onOpenLibrary, onAddSong, onOpenSong, onSettings, onComplete }: Props) {
+export function HomeScreen({ library, onOpenLibrary, onAddSong, onOpenSong, onSettings, onComplete, onCommunity }: Props) {
   const recent = library.slice(0, 4);
   return (
     <main className="v4-shell">
@@ -31,7 +32,7 @@ export function HomeScreen({ library, onOpenLibrary, onAddSong, onOpenSong, onSe
 
       <NoticePanel />
       <YouTubeEntry onComplete={onComplete}/>
-      <div className="home-shortcuts"><button onClick={onOpenLibrary}>Library 열기</button><button onClick={onAddSong}>새 곡 추가 · 파일</button></div>
+      <div className="home-shortcuts"><button onClick={onOpenLibrary}>Library 열기</button><button onClick={onAddSong}>새 곡 추가 · 파일</button>{onCommunity && <button onClick={onCommunity}>COMMUNITY · 공유 채보</button>}</div>
 
       <section className="v4-section-head"><div><span className="eyebrow">RECENT</span><h2>최근 곡</h2></div><button onClick={onOpenLibrary}>전체 Library →</button></section>
       {recent.length === 0 ? (

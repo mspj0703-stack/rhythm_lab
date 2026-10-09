@@ -26,8 +26,10 @@ object RhythmApi {
         val multipart = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("file", file.name, file.asRequestBody(mediaType))
-            .addFormDataPart("difficulty", difficulty.lowercase())
+            .addFormDataPart("difficulty", Difficulty.normalize(difficulty))
             .addFormDataPart("seed", seed.toString())
+            // Companion charts are touch charts: request the mobile profile explicitly (v5 Phase 1 contract).
+            .addFormDataPart("platform", "mobile")
             .build()
 
         val request = Request.Builder()

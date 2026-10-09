@@ -4,6 +4,7 @@ import type { AnalysisResponse } from "./types";
 import { DIFFICULTIES } from "../types/chart";
 import { defaultChartPlatform } from "../platform/runtime";
 import { ChartPlatformSelect } from "../components/ChartPlatformSelect";
+import { difficultyLabel } from "../constants/difficulty";
 
 export interface VideoPreview { title: string; thumbnail: string; duration: number; channel?: string; }
 export function YouTubeEntry({ onComplete }: { onComplete: (value: AnalysisResponse) => void }) {
@@ -60,7 +61,7 @@ if (!response.ok) {
       <label htmlFor="youtube-url">YouTube URL</label><input id="youtube-url" type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="https://youtu.be/…" value={url} disabled={!!stage} onChange={e => edit(e.target.value)} />
       <div className="youtube-actions"><button type="button" disabled={!!stage} onClick={() => void paste()}>붙여넣기</button><button type="submit" disabled={!!stage || !url.trim()}>URL 불러오기</button></div>
     </form>
-    {preview && <div className="video-preview"><img src={preview.thumbnail} alt="원본 영상 썸네일"/><div><h3>{preview.title}</h3><p>{Math.floor(preview.duration / 60)}:{String(Math.floor(preview.duration % 60)).padStart(2, "0")}{preview.channel ? ` · ${preview.channel}` : ""}</p></div><ChartPlatformSelect value={platform} onChange={setPlatform} disabled={!!stage}/><label>난이도<select value={difficulty} disabled={!!stage} onChange={e => setDifficulty(e.target.value)}>{DIFFICULTIES.map(d => <option key={d} value={d}>{d.toUpperCase()}</option>)}</select></label><button className="primary-action" disabled={!!stage} onClick={() => void request(true)}>채보 만들기</button></div>}
+    {preview && <div className="video-preview"><img src={preview.thumbnail} alt="원본 영상 썸네일"/><div><h3>{preview.title}</h3><p>{Math.floor(preview.duration / 60)}:{String(Math.floor(preview.duration % 60)).padStart(2, "0")}{preview.channel ? ` · ${preview.channel}` : ""}</p></div><ChartPlatformSelect value={platform} onChange={setPlatform} disabled={!!stage}/><label>난이도<select value={difficulty} disabled={!!stage} onChange={e => setDifficulty(e.target.value)}>{DIFFICULTIES.map(d => <option key={d} value={d}>{difficultyLabel(d)}</option>)}</select></label><button className="primary-action" disabled={!!stage} onClick={() => void request(true)}>채보 만들기</button></div>}
     {stage && <div className="stage-status" role="status" aria-live="polite"><i className="status-spinner"/>{stage === "preview" ? "영상 정보 확인 중…" : "오디오 준비 · 음악 분석 · 채보 생성 중…"}<small>완료되면 자동으로 플레이 준비 화면으로 이동합니다.</small></div>}
     {error && <p className="error-box" role="alert">{error}</p>}
   </section>;

@@ -22,12 +22,14 @@ async function click(text: string) {
   expect(b).toBeDefined();
   await act(async () => b!.click());
 }
+// v5 Phase 2: a bare canplay no longer starts a song; the browser must report it can play through.
 async function prepareMedia() {
   await act(async () => { container.querySelector("video,audio")!.dispatchEvent(new Event("canplay")); });
+  await act(async () => { container.querySelector("video,audio")!.dispatchEvent(new Event("canplaythrough")); });
 }
 async function autoStart() {
   await prepareMedia();
-  await act(async () => { await vi.advanceTimersByTimeAsync(2200); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(3200); });
   await act(async () => Promise.resolve());
 }
 async function key(type: "keydown" | "keyup", key: string) {
@@ -78,7 +80,7 @@ describe("media lifecycle and input integration", () => {
   });
   it("backgrounding during countdown cancels delayed start until an explicit resume", async () => {
     await render(); await prepareMedia();
-    await act(async () => vi.advanceTimersByTimeAsync(700));
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
     await act(async () => { window.dispatchEvent(new Event("beatdash:pause")); });
     await act(async () => vi.advanceTimersByTimeAsync(3000));
     expect(play).not.toHaveBeenCalled();
@@ -86,7 +88,7 @@ describe("media lifecycle and input integration", () => {
     expect(debug().lifecycleBlocked).toBe(true);
     await act(async () => { window.dispatchEvent(new Event("beatdash:resume")); });
     expect(debug().startupPhase).toBe("countdown");
-    await act(async () => vi.advanceTimersByTimeAsync(2200));
+    await act(async () => vi.advanceTimersByTimeAsync(3200));
     expect(play).toHaveBeenCalledTimes(1);
   });
   it("does not start before gesture; rejected play is visible and retry works", async () => {
@@ -99,26 +101,33 @@ describe("media lifecycle and input integration", () => {
     expect(debug().startupPhase).toBe("preparing");
     await prepareMedia();
     expect(debug().startupPhase).toBe("countdown");
-    await act(async () => { await vi.advanceTimersByTimeAsync(2200); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3200); });
     expect(debug().gameStarted).toBe(true); expect(debug().paused).toBe(false);
   });
-  it("pause freezes judgement, releases Hold, clears stale keys and allows regrab", async () => {
+  // v5 Phase 2 policy: Pause freezes a Hold (no Miss); Continue runs 3-2-1, then the lifted lane gets one
+  // resume re-grab window (RESUME_HOLD_GRACE_MS) instead of the 100 ms grace.
+  it("pause freezes judgement and the Hold, clears stale keys and allows regrab after the resume countdown", async () => {
     await render(); await autoStart(); await advance(2); await key("keydown", "f");
     expect(debug().state.notes[1].status).toBe("holding");
     await key("keydown", "Escape"); expect(debug().paused).toBe(true); expect(pause).toHaveBeenCalled();
+    expect(debug().state.notes[1].status).toBe("holding");
     await key("keyup", "f");
-    await key("keydown", "Escape"); expect(debug().paused).toBe(false);
-    await key("keydown", "f"); await advance(3.01);
+    await key("keydown", "Escape"); expect(debug().paused).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(debug().paused).toBe(false);
+    await advance(2.3); await key("keydown", "f"); await advance(3.01);
     expect(debug().state.notes[1].status).toBe("hit");
   });
   it("Hold cannot complete hands-free after pause", async () => {
     await render(); await autoStart(); await advance(2); await key("keydown", "f");
-    await key("keydown", "Escape"); await key("keyup", "f"); await key("keydown", "Escape"); await advance(2.11);
+    await key("keydown", "Escape"); await key("keyup", "f"); await key("keydown", "Escape");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await advance(2.45);
     expect(debug().state.notes[1].status).toBe("hold_broken");
   });
   it("restart resets score, media time, gesture gate and stale inputs", async () => {
     await render(); await autoStart(); await advance(1); await key("keydown", "d");
-    await key("keydown", "Escape"); await click("Restart");
+    await key("keydown", "Escape"); await click("다시 시작");
     expect(debug().state.totalJudged).toBe(0); expect(debug().gameStarted).toBe(false);
     expect((container.querySelector("video") as HTMLVideoElement).currentTime).toBe(0);
     await autoStart(); await advance(1); await key("keydown", "d"); expect(debug().state.notes[0].status).toBe("hit");
@@ -129,6 +138,8 @@ describe("media lifecycle and input integration", () => {
   });
   it("MV off keeps the same audible video element and does not pause it", async () => {
     await render(); await autoStart(); const video = container.querySelector("video")!;
+    // v5 Phase 2: MV settings live in the Pause menu.
+    await key("keydown", "Escape"); await click("MV 설정"); pause.mockClear();
     await act(async () => (container.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
     expect(container.querySelector("video")).toBe(video); expect(video.muted).toBe(false); expect(video.style.opacity).toBe("0"); expect(pause).not.toHaveBeenCalled();
   });
@@ -202,12 +213,13 @@ describe("hotfix bounded media recovery", () => {
     await dispatch("error");
     await act(async () => { window.dispatchEvent(new Event("beatdash:pause")); });
     await dispatch("loadedmetadata"); await dispatch("seeked"); expect(play).toHaveBeenCalledTimes(1); expect(debug().paused).toBe(true);
-    await key("keydown", "Escape"); await dispatch("loadedmetadata"); expect(media().currentTime).toBe(1);
+    await key("keydown", "Escape"); await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await dispatch("loadedmetadata"); expect(media().currentTime).toBe(1);
     await dispatch("seeked"); expect(debug().paused).toBe(false);
   });
   it("restart cancels recovery and never restores the old position", async () => {
     await render(); await autoStart(); await advance(2);
-    await dispatch("error"); await click("Restart");
+    await dispatch("error"); await click("다시 시작");
     await dispatch("loadedmetadata"); await dispatch("seeked");
     expect(media().currentTime).toBe(0); expect(play).toHaveBeenCalledTimes(1); expect(debug().gameStarted).toBe(false);
   });

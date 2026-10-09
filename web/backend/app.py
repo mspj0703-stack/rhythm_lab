@@ -27,6 +27,11 @@ from chartgen.errors import ChartGenError
 from chartgen.config import DIFFICULTIES
 from chartgen.pipeline import generate_chart
 
+try:  # `backend.app` in the container, plain `app` when tests import it from web/backend
+    from .community import router as community_router
+except ImportError:
+    from community import router as community_router
+
 RUNTIME = ROOT / ".runtime"
 UPLOADS = RUNTIME / "uploads"
 RESULTS = RUNTIME / "results"
@@ -48,6 +53,7 @@ if not APP_VERSION:
     raise RuntimeError("web/VERSION must not be empty")
 
 app = FastAPI(title="BEATDASH", version=APP_VERSION)
+app.include_router(community_router)
 
 
 class EvaluationPayload(BaseModel):
@@ -62,6 +68,12 @@ class YoutubeAnalyzePayload(BaseModel):
     difficulty: str = Field(default="hard", max_length=16)
     seed: int = 42
     platform: str = Field(default="mobile", max_length=16)
+
+
+def _normalize_difficulty(value: str) -> str:
+    """Internal values stay Phase 1 (`extreme`); `master` is the v5 Phase 2 display name and is accepted as an alias."""
+    difficulty = value.strip().lower()
+    return "extreme" if difficulty == "master" else difficulty
 
 
 def _validate_youtube_url(raw_url: str) -> str:
@@ -208,6 +220,8 @@ def health() -> dict:
         "maxUploadMb": MAX_UPLOAD_MB,
         "maxAudioDurationSec": MAX_AUDIO_DURATION_SEC,
         "youtubePotProvider": bool(YTDLP_POT_PROVIDER_URL),
+        # Community charts need COMMUNITY_DB_PATH on a persistent volume; the default path is ephemeral.
+        "communityPersistentStorage": bool(os.getenv("COMMUNITY_DB_PATH")),
     }
 
 
@@ -276,9 +290,9 @@ async def analyze(
 ) -> dict:
     if platform not in {"mobile", "desktop"}:
         raise HTTPException(status_code=400, detail="플랫폼은 mobile/desktop 중 하나여야 합니다.")
-    difficulty = difficulty.strip().lower()
+    difficulty = _normalize_difficulty(difficulty)
     if difficulty not in DIFFICULTIES:
-        raise HTTPException(status_code=400, detail="난이도는 easy/normal/hard/expert/extreme 중 하나여야 합니다.")
+        raise HTTPException(status_code=400, detail="난이도는 easy/normal/hard/expert/master(extreme) 중 하나여야 합니다.")
     if seed < -2_147_483_648 or seed > 2_147_483_647:
         raise HTTPException(status_code=400, detail="seed 범위가 너무 큽니다.")
 
@@ -313,9 +327,9 @@ async def analyze(
 async def analyze_youtube(payload: YoutubeAnalyzePayload) -> dict:
     if payload.platform not in {"mobile", "desktop"}:
         raise HTTPException(status_code=400, detail="플랫폼은 mobile/desktop 중 하나여야 합니다.")
-    difficulty = payload.difficulty.strip().lower()
+    difficulty = _normalize_difficulty(payload.difficulty)
     if difficulty not in DIFFICULTIES:
-        raise HTTPException(status_code=400, detail="난이도는 easy/normal/hard/expert/extreme 중 하나여야 합니다.")
+        raise HTTPException(status_code=400, detail="난이도는 easy/normal/hard/expert/master(extreme) 중 하나여야 합니다.")
     if payload.seed < -2_147_483_648 or payload.seed > 2_147_483_647:
         raise HTTPException(status_code=400, detail="seed 범위가 너무 큽니다.")
     url = _validate_youtube_url(payload.url)

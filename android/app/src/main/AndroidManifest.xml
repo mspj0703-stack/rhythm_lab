@@ -20,8 +20,11 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- configChanges: rotating outside a locked play session resizes the WebView instead of
+             recreating the Activity (which would reload the page and drop the current screen). -->
         <activity
             android:name=".PlayActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false" />
 
         <activity

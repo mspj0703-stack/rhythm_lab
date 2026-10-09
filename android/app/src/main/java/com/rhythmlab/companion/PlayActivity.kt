@@ -2,6 +2,7 @@ package com.rhythmlab.companion
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.graphics.Bitmap
@@ -21,6 +22,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import android.view.View
+import android.widget.FrameLayout
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import java.io.File
 import java.io.ByteArrayInputStream
 import java.io.FileInputStream
@@ -63,6 +69,50 @@ class PlayActivity : AppCompatActivity() {
     private inner class ArtworkBridge {
         @JavascriptInterface fun pickCover() { runOnUiThread { coverPicker.launch("image/*") } }
     }
+
+    /**
+     * v5 Phase 2 play-time rotation lock. The Web player calls lock() when a play session starts and
+     * unlock() when it ends or leaves; the Activity is never locked outside a play session.
+     */
+    private var playModeActive = false
+    private inner class OrientationBridge {
+        // `kind` is informational: the native lock always keeps the rotation the screen has right now.
+        @Suppress("UNUSED_PARAMETER")
+        @JavascriptInterface fun lock(kind: String?) { runOnUiThread { if (isTrustedPage()) enterPlayMode() } }
+        @JavascriptInterface fun unlock() { runOnUiThread { exitPlayMode() } }
+    }
+
+    private fun isTrustedPage(): Boolean =
+        ::webView.isInitialized && Uri.parse(webView.url.orEmpty()).host == Uri.parse(RhythmApi.WEB_BASE).host
+
+    private fun insetsController() = WindowInsetsControllerCompat(window, window.decorView)
+
+    private fun enterPlayMode() {
+        playModeActive = true
+        // LOCKED keeps whatever rotation the screen has right now (portrait or landscape, incl. reverse).
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        // A Hold is a long press: without this the WebView may start text selection / haptic long-press on
+        // the held finger, cancel its pointer and swallow the other fingers' taps. Play screen only.
+        webView.setOnLongClickListener { true }
+        webView.isLongClickable = false
+        webView.isHapticFeedbackEnabled = false
+        insetsController().apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    private fun exitPlayMode() {
+        if (!playModeActive && requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) return
+        playModeActive = false
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (::webView.isInitialized) {
+            webView.setOnLongClickListener(null)
+            webView.isLongClickable = true
+            webView.isHapticFeedbackEnabled = true
+        }
+        insetsController().show(WindowInsetsCompat.Type.systemBars())
+    }
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val callback = fileCallback
         fileCallback = null
@@ -84,7 +134,18 @@ class PlayActivity : AppCompatActivity() {
         if (song == null && entryView == null) { finish(); return }
 
         webView = WebView(this)
-        setContentView(webView)
+        // Edge-to-edge safe: pad the WebView container by the system bar / display cutout insets so the
+        // full-screen player never draws under the status bar, gesture bar or notch (targetSdk 35).
+        val root = FrameLayout(this)
+        root.setBackgroundColor(0xFF08070D.toInt())
+        root.addView(webView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        setContentView(root)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.mediaPlaybackRequiresUserGesture = false
@@ -92,6 +153,7 @@ class PlayActivity : AppCompatActivity() {
         webView.visibility = View.INVISIBLE
         webView.settings.allowFileAccess = false
         webView.addJavascriptInterface(ArtworkBridge(), "BeatdashArtwork")
+        webView.addJavascriptInterface(OrientationBridge(), "BeatdashOrientation")
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
                 fileCallback?.onReceiveValue(null)
@@ -116,6 +178,12 @@ class PlayActivity : AppCompatActivity() {
                 if (!request.isForMainFrame || request.url.host == Uri.parse(RhythmApi.WEB_BASE).host) return false
                 startActivity(Intent(Intent.ACTION_VIEW, request.url))
                 return true
+            }
+
+            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                // A new page means no play session survives: never leave the app rotation-locked.
+                exitPlayMode()
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -167,7 +235,12 @@ class PlayActivity : AppCompatActivity() {
         val url = if (song != null) "${RhythmApi.WEB_BASE}/?session=${Uri.encode(song.id)}&saved=1" else "${RhythmApi.WEB_BASE}/?view=$entryView"
         webView.loadUrl("$url&nativeVersion=${Uri.encode(expectedWebVersion)}&nativeBuild=$expectedBuild&webRefresh=$expectedBuild")
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { finish() }
+            // v5 Phase 2: during gameplay Back opens the Pause menu (the Web player cleans up and decides);
+            // only when the page does not handle it does the Activity close.
+            override fun handleOnBackPressed() {
+                if (!::webView.isInitialized || webView.visibility != View.VISIBLE) { finish(); return }
+                webView.evaluateJavascript(BACK_SCRIPT) { result -> if (result != "true") finish() }
+            }
         })
     }
 
@@ -230,6 +303,8 @@ class PlayActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The system may show the bars again while the app was in the background; Pause keeps the lock.
+        if (playModeActive) insetsController().hide(WindowInsetsCompat.Type.systemBars())
         if (::webView.isInitialized) {
             webView.onResume()
             webView.evaluateJavascript("window.dispatchEvent(new Event('beatdash:resume'));", null)
@@ -237,11 +312,16 @@ class PlayActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        exitPlayMode()
         fileCallback?.onReceiveValue(null)
         fileCallback = null
         if (::webView.isInitialized) webView.destroy()
         super.onDestroy()
     }
 
-    companion object { const val EXTRA_SONG_ID = "song_id"; const val EXTRA_VIEW = "entry_view" }
+    companion object {
+        const val EXTRA_SONG_ID = "song_id"
+        const val EXTRA_VIEW = "entry_view"
+        private const val BACK_SCRIPT = "(function(){try{return !!(window.__beatdashBack && window.__beatdashBack());}catch(e){return false;}})()"
+    }
 }

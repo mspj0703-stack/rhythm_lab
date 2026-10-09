@@ -1,0 +1,63 @@
+/* ===== v5 Phase 2 · Maker v1 ===== */
+.maker-page { width: min(1080px, calc(100% - 16px)); margin: 0 auto; padding: 10px 0 calc(24px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; color: #d8d2e4; }
+.maker-header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.maker-title { min-width: 0; display: flex; flex-direction: column; }
+.maker-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+.maker-title span { color: #9b93a8; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maker-dirty { font-size: 11px; color: #7f788c; }
+.maker-dirty.on { color: #ffcf7a; }
+.maker-alert, .maker-message { margin: 0; padding: 8px 12px; border-radius: 10px; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+.maker-alert { background: rgba(255,90,90,.12); border: 1px solid rgba(255,110,110,.35); color: #ffb3b3; }
+.maker-alert button { background: none; border: 0; color: inherit; cursor: pointer; }
+.maker-message { background: rgba(126,230,187,.08); border: 1px solid rgba(126,230,187,.3); color: #a9f0d2; }
+.maker-tools, .maker-transport, .maker-actions, .maker-lane-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.maker-page button, .maker-page select, .maker-page input[type="number"] { min-height: 38px; border: 1px solid #3a3346; background: #17131f; color: #e9e4f2; border-radius: 9px; padding: 6px 11px; font-size: 13px; }
+.maker-page button { cursor: pointer; }
+.maker-page button:disabled { opacity: .4; cursor: default; }
+.maker-page button.on, .maker-page button[aria-checked="true"] { background: #4d3592; border-color: #8f6bff; color: #fff; }
+.maker-segment { display: flex; gap: 4px; flex-wrap: wrap; }
+.maker-zoom { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #8d8697; }
+.maker-snap { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #a49cb1; }
+.maker-editor { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 10px; }
+.maker-lanes { position: relative; height: clamp(320px, 62vh, 900px); overflow: hidden; border-radius: 12px; border: 1px solid #2e2840; background: linear-gradient(180deg, #0b0913, #05040a); touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.maker-lane-column { position: absolute; top: 0; bottom: 0; width: 25%; border-right: 1px solid rgba(255,255,255,.06); pointer-events: none; }
+.maker-lane-column span { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,.25); font-size: 11px; font-weight: 800; }
+.maker-grid { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid rgba(255,255,255,.05); pointer-events: none; }
+.maker-grid.beat { border-top-color: rgba(255,255,255,.14); }
+.maker-grid.bar { border-top: 1px solid rgba(178,152,255,.42); }
+.maker-note { position: absolute; width: calc(25% - 8px); border-radius: 6px; pointer-events: none; box-sizing: border-box; }
+.maker-note.tap { background: #8f82ff; }
+.maker-note.flick { background: #ff845e; box-shadow: 0 0 0 2px rgba(255,255,255,.75) inset; }
+.maker-note.flick::after { content: "▲"; position: absolute; inset: 0; display: grid; place-items: center; font-size: 10px; color: #fff; }
+.maker-note.hold { background: linear-gradient(180deg, rgba(76,224,177,.35), rgba(76,224,177,.75)); border: 2px solid #4ce0b1; border-top-width: 5px; }
+.maker-note.lane-1.tap { background: #4ce0b1; } .maker-note.lane-2.tap { background: #ff9d5e; } .maker-note.lane-3.tap { background: #ff6ca5; }
+.maker-note.selected { outline: 2px solid #fff; outline-offset: 1px; box-shadow: 0 0 14px rgba(255,255,255,.55); }
+.maker-playhead { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid #ffd36e; pointer-events: none; z-index: 2; }
+.maker-playhead span { position: absolute; right: 6px; top: -18px; font-size: 11px; color: #ffd36e; font-variant-numeric: tabular-nums; }
+.maker-inspector { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #2e2840; border-radius: 12px; background: #0e0c14; font-size: 13px; min-width: 0; }
+.maker-inspector label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.maker-inspector input[type="number"] { width: 110px; }
+.maker-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.maker-row > span { width: 64px; color: #8f889c; font-size: 12px; }
+.maker-hint { margin: 0; color: #8c8597; font-size: 12px; line-height: 1.5; }
+.maker-danger { border-color: rgba(255,110,110,.5) !important; color: #ffb3b3 !important; }
+.maker-validation { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.maker-validation-summary.ok { border-color: rgba(126,230,187,.5) !important; color: #a9f0d2 !important; }
+.maker-validation-summary.has-warning { border-color: rgba(255,209,121,.5) !important; color: #ffd179 !important; }
+.maker-validation-summary.has-error { border-color: rgba(255,110,110,.6) !important; color: #ffb3b3 !important; }
+.maker-validation small { color: #a59eb1; font-size: 11px; }
+.maker-validation ul { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; display: grid; gap: 4px; }
+.maker-validation li button { width: 100%; text-align: left; font-size: 11px !important; min-height: 30px !important; }
+.maker-validation li.error button { color: #ffb3b3; } .maker-validation li.warning button { color: #ffd179; }
+.maker-lane-buttons button { flex: 1; min-width: 60px; }
+.maker-clock { font-variant-numeric: tabular-nums; font-size: 18px; color: #fff; min-width: 100px; }
+.maker-scrub { flex: 1; min-width: 160px; }
+.maker-play { width: 52px; font-size: 16px !important; }
+.maker-save { background: linear-gradient(135deg, #8e5bf3, #6259ff) !important; border: 0 !important; color: #fff !important; font-weight: 900; letter-spacing: .06em; }
+.maker-test-button { font-weight: 800; }
+.maker-media { display: none; }
+@media (max-width: 760px) {
+  .maker-editor { grid-template-columns: 1fr; }
+  .maker-lanes { height: clamp(300px, 55vh, 640px); }
+  .maker-inspector { order: 2; }
+}

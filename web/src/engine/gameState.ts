@@ -12,7 +12,7 @@ import {
 import { calculateNoteScore } from "./scoring";
 import { advanceHoldTicks } from "./holdTicks";
 import { applyJudgementToGauge, isFailed } from "./gauge";
-import { ACCURACY_WEIGHT, GAUGE_CONFIG, HOLD_REGRAB_GRACE_MS } from "../constants/config";
+import { ACCURACY_WEIGHT, GAUGE_CONFIG, HOLD_REGRAB_GRACE_MS, RESUME_HOLD_GRACE_MS } from "../constants/config";
 
 
 export type FeedbackPhase = "hit" | "hold_start" | "hold_complete" | "hold_break" | "miss";
@@ -301,6 +301,26 @@ export function tick(state: GameState, currentTimeSec: number): GameState {
   }
 
   return next;
+}
+
+/**
+ * Resume after Pause. Holds frozen by the pause continue on lanes that are physically pressed at the resume
+ * instant; every other frozen Hold gets one re-grab window of `graceMs` starting at `resumeTimeSec`
+ * (expressed through the normal grace check, so a later re-press recovers it and no press breaks it).
+ * Nothing else changes: no score, combo, tick or judgement is produced here.
+ */
+export function resumeHolds(state: GameState, resumeTimeSec: number, pressedLanes: readonly Lane[], graceMs = RESUME_HOLD_GRACE_MS): GameState {
+  if (state.finished || state.failed) return state;
+  let changed = false;
+  const extraSec = Math.max(0, graceMs - HOLD_REGRAB_GRACE_MS) / 1000;
+  const notes = state.notes.map((runtime) => {
+    if (runtime.status !== "holding" || runtime.note.type !== "hold") return runtime;
+    changed = true;
+    return pressedLanes.includes(runtime.note.lane)
+      ? { ...runtime, holdReleasedAt: undefined }
+      : { ...runtime, holdReleasedAt: resumeTimeSec + extraSec };
+  });
+  return changed ? { ...state, notes } : state;
 }
 
 export function restartGame(state: GameState): GameState {

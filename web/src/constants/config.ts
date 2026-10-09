@@ -50,6 +50,16 @@ export const HOLD_RELEASE_TOLERANCE_MS = 120;
 /** Hold를 일찍 놓쳤을 때 다시 누를 수 있는 짧은 복구 유예 시간 */
 export const HOLD_REGRAB_GRACE_MS = 100;
 
+/**
+ * v5 Phase 2: a Hold interrupted by Pause keeps "holding" while paused. When play resumes (after the
+ * 3-2-1 countdown) a lane that is not physically pressed gets this one-time re-grab window instead of
+ * the normal 100 ms - fingers were lifted to use the Pause menu, so 100 ms would be an unfair Miss.
+ */
+export const RESUME_HOLD_GRACE_MS = 400;
+
+/** 3-2-1 countdown step for start, resume and restart. */
+export const COUNTDOWN_STEP_MS = 1000;
+
 /** 게이지 설정 */
 export const GAUGE_CONFIG = {
   INITIAL: 100,

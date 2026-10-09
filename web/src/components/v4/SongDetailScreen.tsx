@@ -8,6 +8,12 @@ import type { BestRecord, LibraryBundle, LibraryChart, PlayRecord } from "../../
 import { DIFFICULTIES, type ChartPlatform } from "../../types/chart";
 import { defaultChartPlatform } from "../../platform/runtime";
 import { ChartPlatformSelect } from "../ChartPlatformSelect";
+import { originBadge, originLabel } from "../../maker/originLabel";
+import { checkShareEligibility } from "../../community/share";
+import { shortAuthor } from "../../library/author";
+import { isAiOriginal } from "../../library/model";
+import "../../community/community.css";
+import { difficultyLabel } from "../../constants/difficulty";
 
 interface Props {
   bundle: LibraryBundle;
@@ -16,6 +22,11 @@ interface Props {
   onDelete: () => void;
   onChanged: () => void;
   onGenerateDifficulty: (difficulty: string, platform?: ChartPlatform) => Promise<void>;
+  /** Opens the Maker for this chart (AI/Community charts are cloned on save, never overwritten). */
+  onEdit?: (chart: LibraryChart) => void;
+  onShare?: (chart: LibraryChart, description?: string) => Promise<void>;
+  onDeleteChart?: (chart: LibraryChart) => Promise<void>;
+  initialChartId?: string;
 }
 
 
@@ -30,18 +41,22 @@ function shortClear(record: PlayRecord): string {
   return record.clearType === "PERFECT_COMBO" ? "PC" : record.clearType === "FULL_COMBO" ? "FC" : "CL";
 }
 
-export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, onGenerateDifficulty }: Props) {
+export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, onGenerateDifficulty, onEdit, onShare, onDeleteChart, initialChartId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState(bundle.song.title);
   const [offset, setOffset] = useState(bundle.song.timingOffsetMs);
-  const [selectedId, setSelectedId] = useState(bundle.charts[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(initialChartId && bundle.charts.some((chart) => chart.id === initialChartId) ? initialChartId : bundle.charts[0]?.id ?? "");
+  const [sharing, setSharing] = useState(false);
+  const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [bests, setBests] = useState<Record<string, BestRecord | null>>({});
   const [records, setRecords] = useState<PlayRecord[]>([]);
   const [coverBusy, setCoverBusy] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
   const [platform, setPlatform] = useState(defaultChartPlatform);
   const selected = useMemo(() => bundle.charts.find((chart) => chart.id === selectedId) ?? bundle.charts[0], [bundle.charts, selectedId]);
-  const existingDifficulties = useMemo(() => new Set(bundle.charts.filter(chart => chart.chart.platformProfile === platform).map((chart) => chart.difficulty.toLowerCase())), [bundle.charts, platform]);
+  // Only AI originals count: a Maker edit or Community download never hides the AI generator for that slot.
+  const existingDifficulties = useMemo(() => new Set(bundle.charts.filter(chart => isAiOriginal(chart) && chart.chart.platformProfile === platform).map((chart) => chart.difficulty.toLowerCase())), [bundle.charts, platform]);
+  const shareCheck = useMemo(() => selected?.origin === "MANUAL_EDITED" ? checkShareEligibility(selected, bundle) : null, [selected, bundle]);
   const missingDifficulties = DIFFICULTIES.filter((difficulty) => !existingDifficulties.has(difficulty));
 
   useEffect(() => {
@@ -67,6 +82,20 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
   async function restoreOriginalCover() { if (coverBusy) return; try { setError(null); await updateSongCustomCover(bundle.song.id, undefined); onChanged(); } catch (error) { setError((error as Error).message); } }
   async function saveTitle() { try { setError(null); await updateSongTitle(bundle.song.id, title); onChanged(); } catch (error) { setError((error as Error).message); } }
   async function saveOffset(value: number) { const next = normalizeTimingOffsetMs(value); setOffset(next); try { setError(null); await updateSongOffset(bundle.song.id, next); onChanged(); } catch (error) { setError((error as Error).message); } }
+  async function share() {
+    if (!selected || !onShare || sharing) return;
+    const description = window.prompt("공유 설명 (선택, 500자 이내)", selected.description ?? "") ?? undefined;
+    setSharing(true); setShareMessage(null);
+    try { setError(null); await onShare(selected, description); setShareMessage("Community에 공유했습니다."); }
+    catch (error) { setError((error as Error).message); }
+    finally { setSharing(false); }
+  }
+  async function removeChart() {
+    if (!selected || !onDeleteChart || isAiOriginal(selected)) return;
+    if (!window.confirm(`「${selected.label ?? difficultyLabel(selected.difficulty)}」 채보와 이 채보의 기록을 삭제할까요? AI 원본과 다른 채보는 유지됩니다.`)) return;
+    try { setError(null); await onDeleteChart(selected); setSelectedId(bundle.charts.find((chart) => chart.id !== selected.id)?.id ?? ""); }
+    catch (error) { setError((error as Error).message); }
+  }
   async function generate(difficulty: string, profile: ChartPlatform = platform) {
     if (generating) return;
     setGenerating(difficulty);
@@ -107,7 +136,7 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
       </section>
 
       <section className="difficulty-select">
-        {bundle.charts.slice().sort((a, b) => DIFFICULTIES.indexOf(a.difficulty.toLowerCase() as typeof DIFFICULTIES[number]) - DIFFICULTIES.indexOf(b.difficulty.toLowerCase() as typeof DIFFICULTIES[number])).map((chart) => <button key={chart.id} className={selected?.id === chart.id ? "selected" : ""} onClick={() => setSelectedId(chart.id)}><small>{chart.difficulty.toUpperCase()} · {chart.chart.platformProfile ?? "legacy"}</small><strong>Lv.{chart.level}</strong><span>{statusLabel(bests[chart.id])}</span></button>)}
+        {bundle.charts.slice().sort((a, b) => DIFFICULTIES.indexOf(a.difficulty.toLowerCase() as typeof DIFFICULTIES[number]) - DIFFICULTIES.indexOf(b.difficulty.toLowerCase() as typeof DIFFICULTIES[number])).map((chart) => <button key={chart.id} className={selected?.id === chart.id ? "selected" : ""} onClick={() => setSelectedId(chart.id)}><small>{difficultyLabel(chart.difficulty)} · {chart.chart.platformProfile ?? "legacy"}<em className={`origin-badge ${originBadge(chart.origin).toLowerCase()}`}>{originBadge(chart.origin)}</em></small><strong>Lv.{chart.level}</strong>{!isAiOriginal(chart) && chart.label && <small className="chart-label">{chart.label}</small>}<span>{statusLabel(bests[chart.id])}</span></button>)}
       </section>
 
       {selected && <section className="record-panel">
@@ -116,13 +145,22 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
         <button className="big-play" disabled={Boolean(generating)} onClick={() => onPlay(selected)}>PLAY <span>→</span></button>
       </section>}
 
+      {selected && (onEdit || onShare || onDeleteChart) && <section className="chart-tools-panel" aria-label="채보 편집·공유">
+        <p>{originLabel(selected.origin)}{selected.origin === "COMMUNITY" && ` · 작성자 ${shortAuthor(selected.authorId)}`}{!isAiOriginal(selected) && ` · v${selected.chartVersion}`}{selected.cloudPublished && " · 공유됨"}</p>
+        {onEdit && <button disabled={Boolean(generating)} onClick={() => onEdit(selected)}>{selected.origin === "MANUAL_EDITED" ? "EDIT · Maker" : "EDIT · Maker (복제본 생성)"}</button>}
+        {onShare && selected.origin === "MANUAL_EDITED" && <button disabled={sharing || !shareCheck?.ok} onClick={() => void share()}>{sharing ? "공유 중…" : selected.cloudChartId ? (selected.cloudPublished ? "공유됨 · 다시 업로드" : "변경 사항 공유") : "COMMUNITY 공유"}</button>}
+        {onDeleteChart && !isAiOriginal(selected) && <button onClick={() => void removeChart()}>이 채보 삭제</button>}
+        {shareCheck && !shareCheck.ok && <ul className="share-reasons">{shareCheck.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+        {shareMessage && <p role="status">{shareMessage}</p>}
+      </section>}
+
       {records.length > 0 && <section className="recent-records"><div className="panel-heading"><span className="eyebrow">RECENT PLAYS</span><h2>최근 기록</h2></div><div className="recent-record-list">{records.map((item) => <div key={item.id}><span className={`record-clear record-${shortClear(item).toLowerCase()}`}>{shortClear(item)}</span><strong>{item.score.toLocaleString()}</strong><span>{item.accuracy.toFixed(2)}%</span><span>{item.maxCombo} combo</span><time>{new Date(item.playedAt).toLocaleDateString()}</time></div>)}</div></section>}
 
       <section className="song-settings-panel"><div><span className="eyebrow">SONG OFFSET</span><h2>{offset > 0 ? "+" : ""}{offset} ms</h2><p>이 곡의 보정값을 전역 Offset에 더합니다. 최종 적용 범위는 −300~+300 ms입니다.</p></div><div className="song-offset-controls"><button onClick={() => void saveOffset(offset - 10)}>−10</button><input type="range" min={-300} max={300} step={1} value={offset} onChange={(e) => setOffset(Number(e.target.value))} onPointerUp={() => void saveOffset(offset)} onKeyUp={() => void saveOffset(offset)}/><button onClick={() => void saveOffset(offset + 10)}>+10</button><button className="reset-offset" onClick={() => void saveOffset(0)}>RESET</button></div></section>
 
       <ChartPlatformSelect value={platform} onChange={setPlatform} disabled={Boolean(generating)} />
-      {missingDifficulties.length > 0 && <section className="chart-generator-panel"><div><span className="eyebrow">ADD CHART</span><h2>다른 난이도 생성</h2><p>저장된 미디어를 서버로 보내 새 난이도를 생성합니다. 네트워크 연결이 필요합니다.</p></div><div>{missingDifficulties.map((difficulty) => <button key={difficulty} disabled={Boolean(generating)} onClick={() => void generate(difficulty)}>{generating === difficulty ? "GENERATING…" : `＋ ${difficulty.toUpperCase()}`}</button>)}</div></section>}
-      {selected && <section className="chart-generator-panel"><div><h2>현재 채보 재생성</h2><p>노트가 바뀌면 새 채보 버전으로 기록을 시작합니다. 이전 기록은 보관됩니다. 기존 채보는 선택한 플랫폼의 새 채보로 생성합니다.</p></div><button disabled={Boolean(generating)} onClick={() => { if (window.confirm("현재 난이도를 다시 생성할까요?")) void generate(selected.difficulty, selected.chart.platformProfile ?? platform); }}>{generating === selected.difficulty ? "GENERATING…" : "REGENERATE"}</button></section>}
+      {missingDifficulties.length > 0 && <section className="chart-generator-panel"><div><span className="eyebrow">ADD CHART</span><h2>다른 난이도 생성</h2><p>저장된 미디어를 서버로 보내 새 난이도를 생성합니다. 네트워크 연결이 필요합니다.</p></div><div>{missingDifficulties.map((difficulty) => <button key={difficulty} disabled={Boolean(generating)} onClick={() => void generate(difficulty)}>{generating === difficulty ? "GENERATING…" : `＋ ${difficultyLabel(difficulty)}`}</button>)}</div></section>}
+      {selected && isAiOriginal(selected) && <section className="chart-generator-panel"><div><h2>현재 채보 재생성</h2><p>노트가 바뀌면 새 채보 버전으로 기록을 시작합니다. 이전 기록은 보관됩니다. 기존 채보는 선택한 플랫폼의 새 채보로 생성합니다.</p></div><button disabled={Boolean(generating)} onClick={() => { if (window.confirm("현재 난이도를 다시 생성할까요?")) void generate(selected.difficulty, selected.chart.platformProfile ?? platform); }}>{generating === selected.difficulty ? "GENERATING…" : "REGENERATE"}</button></section>}
       <section className="danger-zone"><button onClick={onDelete}>이 곡을 Library에서 삭제</button></section>
     </main>
   );

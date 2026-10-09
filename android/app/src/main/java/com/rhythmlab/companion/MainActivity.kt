@@ -126,7 +126,8 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, PlayActivity::class.java).putExtra(PlayActivity.EXTRA_VIEW, "settings"))
         }
 
-        val difficulties = listOf("Easy", "Normal", "Hard", "Expert")
+        // All five generator difficulties, including MASTER (internal "extreme").
+        val difficulties = Difficulty.OPTIONS
         difficultySpinner.adapter = ArrayAdapter(this, R.layout.spinner_item, difficulties).also {
             it.setDropDownViewResource(R.layout.spinner_dropdown_item)
         }
@@ -253,7 +254,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enqueueUrls(urls: List<String>) {
-        val difficulty = difficultySpinner.selectedItem.toString().lowercase()
+        val difficulty = (difficultySpinner.selectedItem as Difficulty.Option).value
         val seed = seedInput.text.toString().toIntOrNull() ?: 42
         var added = 0
         var duplicates = 0
@@ -330,7 +331,7 @@ class MainActivity : AppCompatActivity() {
             header.addView(statusBadge(job.status))
             row.addView(header)
             row.addView(TextView(this).apply {
-                text = "${job.difficulty.uppercase()} · seed ${job.seed}"
+                text = "${Difficulty.label(job.difficulty)} · seed ${job.seed}"
                 setTextColor(Color.parseColor("#A99CB8"))
                 textSize = 11f
                 setPadding(0, dp(7), 0, 0)
@@ -408,7 +409,7 @@ class MainActivity : AppCompatActivity() {
         }
         for ((index, song) in songs.withIndex()) {
             val button = Button(this).apply {
-                text = "${song.title}\n${song.difficulty.uppercase()}"
+                text = "${song.title}\n${Difficulty.label(song.difficulty)}"
                 isAllCaps = false
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 setTextColor(Color.WHITE)
