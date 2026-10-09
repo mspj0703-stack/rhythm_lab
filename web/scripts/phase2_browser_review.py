@@ -127,6 +127,51 @@ def multitouch(page: Page) -> None:
     check("multi-touch: cancel ends the last finger", pressed() == "0000", pressed())
 
 
+def touch_hold_across_pause(page: Page) -> None:
+    """Real CDP touches: does a finger that stays down (or lifts) while the Pause overlay opens keep a truthful lane state?"""
+    cdp = page.context.new_cdp_session(page)
+    lanes = page.evaluate("[...document.querySelectorAll('.touch-lane')].map(b => { const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })")
+    pressed = lambda: page.evaluate("[...document.querySelectorAll('.lane-input-feedback i')].map(i => i.classList.contains('pressed') ? 1 : 0).join('')")  # noqa: E731
+    pt = lambda i, lane: {"x": lanes[lane][0], "y": lanes[lane][1], "id": i}  # noqa: E731
+    send = lambda kind, points: cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": points})  # noqa: E731
+    # A) finger stays down through Pause + resume countdown
+    send("touchStart", [pt(1, 0)])
+    page.wait_for_timeout(120)
+    page.evaluate("window.__beatdashBack()")
+    page.wait_for_selector(".pause-overlay")
+    page.wait_for_timeout(150)
+    check("touch Hold: the finger is still tracked while the Pause overlay is on top of it", pressed() == "1000", pressed())
+    page.get_by_role("button", name="계속하기").click()
+    page.wait_for_selector(".resume-countdown", state="detached", timeout=6000)
+    page.wait_for_timeout(150)
+    check("touch Hold: the finger is still pressed after the 3-2-1 resume", pressed() == "1000", pressed())
+    send("touchEnd", [pt(1, 0)])
+    page.wait_for_timeout(120)
+    check("touch Hold: lifting afterwards releases the lane (no stuck lane)", pressed() == "0000", pressed())
+    # B) finger lifts while paused
+    send("touchStart", [pt(2, 1)])
+    page.wait_for_timeout(120)
+    page.evaluate("window.__beatdashBack()")
+    page.wait_for_selector(".pause-overlay")
+    send("touchEnd", [pt(2, 1)])
+    page.wait_for_timeout(150)
+    check("touch Hold: a finger lifted under the Pause overlay is released", pressed() == "0000", pressed())
+    page.get_by_role("button", name="계속하기").click()
+    page.wait_for_selector(".resume-countdown", state="detached", timeout=6000)
+    page.wait_for_timeout(150)
+    check("touch Hold: nothing is stuck after resuming", pressed() == "0000", pressed())
+    # C) touchCancel while paused
+    send("touchStart", [pt(3, 2)])
+    page.wait_for_timeout(120)
+    page.evaluate("window.__beatdashBack()")
+    page.wait_for_selector(".pause-overlay")
+    send("touchCancel", [])
+    page.wait_for_timeout(150)
+    check("touch Hold: pointercancel under the Pause overlay releases the lane", pressed() == "0000", pressed())
+    page.get_by_role("button", name="계속하기").click()
+    page.wait_for_selector(".resume-countdown", state="detached", timeout=6000)
+
+
 def wait_db(page: Page, predicate: str, timeout: float = 20) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -184,6 +229,7 @@ def main() -> None:
             check_play_layout(page, "phone-390x844-portrait")
             page.wait_for_function("window.__RHYTHM_DEBUG__ && window.__RHYTHM_DEBUG__.gameStarted", timeout=20000)
             multitouch(page)
+            touch_hold_across_pause(page)
             check_pause_menu(page, "phone-390x844")
             handled = page.evaluate("window.__beatdashBack()")
             check("Back during play opens Pause (handled in page)", handled is True and page.locator(".pause-overlay").count() == 1)
@@ -234,6 +280,19 @@ def main() -> None:
             page.wait_for_selector("text=Community에 공유했습니다.")
             state = wait_db(page, "s => s.charts.some(c => c.origin === 'MANUAL_EDITED' && c.published && c.cloud)")
             check("shared edit is marked published with a cloud ID", True)
+
+            # ---------- Blank chart on the existing song ----------
+            page.get_by_role("button", name="빈 채보로 Maker 시작").click()
+            page.wait_for_selector(".maker-page")
+            check("blank Maker starts with SAVE disabled and no notes", page.get_by_role("button", name="SAVE").is_disabled() and page.locator(".maker-note").count() == 0)
+            page.get_by_role("button", name="＋ F").click()
+            page.get_by_role("button", name="SAVE").click()
+            state = wait_db(page, "s => s.charts.filter(c => c.origin === 'MANUAL_EDITED').length === 2")
+            blank = next(c for c in state["charts"] if c["origin"] == "MANUAL_EDITED" and c["id"] != human["id"])
+            check("blank chart is stored as its own user chart without a parent", blank["parent"] in (None, "") and blank["notes"] == 1, blank)
+            check("AI original untouched by the blank chart", next(c for c in state["charts"] if c["origin"] == "AI_GENERATED")["notes"] == ai["notes"])
+            page.get_by_role("button", name="← 곡 상세").click()
+            page.wait_for_selector(".chart-tools-panel")
 
             # ---------- Another user downloads it ----------
             other = browser.new_context(viewport={"width": 412, "height": 915}, is_mobile=True, has_touch=True, device_scale_factor=2.6)

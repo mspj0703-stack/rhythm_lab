@@ -1,6 +1,7 @@
 # BEATDASH v5.0 Phase 2 Report
 
-- Branch: `v5-phase2` (base `main` 56eb0e9), 푸시하지 않음
+- Branch: `v5-phase2` (base `main` 56eb0e9)
+- **이 문서는 Final Fix 이전 상태 보고서이며, 최종 판정과 수정 내역은 `BEATDASH_V5_PHASE2_FINAL_FIX_REPORT.md`가 대신한다.**
 - Version: `5.0.0-rc.phase2`
 - 범위: 2A Maker v1 → 2B Community → 2C 화면/방향 최적화 + 통합 추가 요구사항(P0/P1)
 
@@ -70,7 +71,7 @@
 
 ## 8. Pause UX
 - 메뉴: 계속하기 / 다시 시작 / MV 설정 / 곡 리스트로 돌아가기. 버튼 크기·터치 영역은 E2E에서 확인(폰/태블릿/데스크탑).
-- Pause 중 Hold 정책(테스트로 고정): 일시정지→재개 카운트다운 후 누르고 있는 레인은 이어서 유지, 뗀 레인은 400ms 1회 재그랩 후 실패 시 hold_broken.
+- Pause 중 Hold 정책: 키보드는 Pause 중에도 누른 상태를 추적했지만, **터치는 Pause에서 포인터 상태를 지워 "계속 누르고 있어도 유지"가 성립하지 않았다.** Final Fix에서 수정(Final Fix 보고서 3절 참조).
 
 ## 9. Resume/Restart Countdown
 - 3-2-1 (`COUNTDOWN_STEP_MS`=1000, 단일 타이머). 재개/다시 시작 공통. 카운트다운 중 입력 무시, 방향 잠금 유지.

@@ -61,3 +61,6 @@
   .maker-lanes { height: clamp(300px, 55vh, 640px); }
   .maker-inspector { order: 2; }
 }
+
+.blank-chart-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.blank-chart-controls select, .blank-chart-controls button { min-height: 44px; }

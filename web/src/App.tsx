@@ -10,6 +10,8 @@ import { loadNoteSpeed, normalizeNoteSpeed, saveNoteSpeed } from "./settings/not
 import { combineTimingOffsets, loadTimingOffsetMs, normalizeTimingOffsetMs, saveTimingOffsetMs } from "./settings/timingOffset";
 import { deleteDerivedChart, deleteSong, getLibrarySong, listLibrary, saveAnalysisToLibrary, savePlayResult, updateSongThumbnail } from "./library/db";
 import { MakerScreen } from "./maker/MakerScreen";
+import { createBlankDraft } from "./maker/blank";
+import type { ChartPlatform } from "./types/chart";
 import { CommunityScreen } from "./community/CommunityScreen";
 import { shareChart } from "./community/shareFlow";
 import { openSongMedia, useMediaHandleRelease, type SongMediaHandle } from "./library/mediaSource";
@@ -34,7 +36,7 @@ type View = "home" | "library" | "upload" | "analysis" | "detail" | "play" | "se
 
 interface Source { chartUrl: string | null; videoUrl: string; }
 interface LibraryPlay { bundle: LibraryBundle; chart: LibraryChart; media: SongMediaHandle; }
-interface MakerSession { bundle: LibraryBundle; chart: LibraryChart; media: SongMediaHandle; }
+interface MakerSession { bundle: LibraryBundle; chart: LibraryChart; media: SongMediaHandle; blank?: boolean; }
 
 function readSource(): Source {
   const params = new URLSearchParams(window.location.search);
@@ -247,6 +249,17 @@ function App() {
     setView("maker");
   }
 
+  async function openBlankMaker(difficulty: string, platform: ChartPlatform) {
+    if (!selectedBundle) return;
+    const bundle = await getLibrarySong(selectedBundle.song.id);
+    if (!bundle) { setLibraryError("곡을 다시 선택해 주세요."); return; }
+    const media = openSongMedia(bundle.song);
+    if (!media) { setLibraryError("이 곡의 미디어 파일을 찾을 수 없어 Maker를 열 수 없습니다."); return; }
+    setLibraryPlay(null);
+    setMakerSession({ bundle, chart: createBlankDraft(bundle, difficulty, platform), media, blank: true });
+    setView("maker");
+  }
+
   async function shareSelectedChart(chart: LibraryChart, description?: string) {
     const bundle = await getLibrarySong(chart.songId);
     const current = bundle?.charts.find((item) => item.id === chart.id);
@@ -305,7 +318,7 @@ function App() {
 
   if (view === "community") return <>{libraryErrorBanner}<CommunityScreen library={library} onBack={() => nav("home")} onAddSong={() => nav("upload")} onImported={(songId, chart) => { void refreshLibrary().then(() => openSong(songId, chart.id)); }} /></>;
   if (view === "maker" && makerSession) {
-    return <>{libraryErrorBanner}<MakerScreen key={makerSession.chart.id} bundle={makerSession.bundle} source={makerSession.chart} media={makerSession.media} noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, makerSession.bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences}
+    return <>{libraryErrorBanner}<MakerScreen key={makerSession.chart.id} blank={makerSession.blank} bundle={makerSession.bundle} source={makerSession.chart} media={makerSession.media} noteSpeed={noteSpeed} timingOffsetMs={combineTimingOffsets(timingOffsetMs, makerSession.bundle.song.timingOffsetMs)} audioSettings={audioSettings} preferences={preferences}
       onExit={() => nav("detail")} onSaved={(chart) => { setDetailChartId(chart.id); void refreshLibrary(); }} /></>;
   }
   if (view === "home") return <>{libraryErrorBanner}<HomeScreen library={library} onCommunity={() => nav("community")} onOpenLibrary={() => nav("library")} onAddSong={() => nav("upload")} onOpenSong={(id) => void openSong(id)} onSettings={() => nav("settings")} onComplete={(payload) => void handleAnalysisComplete(payload)} /></>;
@@ -316,7 +329,7 @@ function App() {
 
   if (view === "detail") {
     if (!selectedBundle) return <div className="app-loading">Library 불러오는 중...</div>;
-    return <>{libraryErrorBanner}<SongDetailScreen key={`${selectedBundle.song.id}:${detailChartId ?? ""}`} initialChartId={detailChartId ?? undefined} onEdit={(chart) => void openMaker(chart).catch((error: Error) => setLibraryError(error.message))} onShare={shareSelectedChart} onDeleteChart={removeDerivedChart} bundle={selectedBundle} onBack={() => nav("library")} onPlay={(chart) => void startLibraryPlay(chart).catch((error: Error) => setLibraryError(error.message))} onDelete={() => void removeSelectedSong().catch((error: Error) => setLibraryError(error.message))} onChanged={() => void refreshLibrary()} onGenerateDifficulty={generateDifficulty} /></>;
+    return <>{libraryErrorBanner}<SongDetailScreen key={`${selectedBundle.song.id}:${detailChartId ?? ""}`} initialChartId={detailChartId ?? undefined} onCreateBlank={(difficulty, platform) => void openBlankMaker(difficulty, platform).catch((error: Error) => setLibraryError(error.message))} onEdit={(chart) => void openMaker(chart).catch((error: Error) => setLibraryError(error.message))} onShare={shareSelectedChart} onDeleteChart={removeDerivedChart} bundle={selectedBundle} onBack={() => nav("library")} onPlay={(chart) => void startLibraryPlay(chart).catch((error: Error) => setLibraryError(error.message))} onDelete={() => void removeSelectedSong().catch((error: Error) => setLibraryError(error.message))} onChanged={() => void refreshLibrary()} onGenerateDifficulty={generateDifficulty} /></>;
   }
 
   if (view === "play" && libraryPlay) {

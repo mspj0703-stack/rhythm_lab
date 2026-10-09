@@ -16,8 +16,10 @@ import math
 import os
 import re
 import sqlite3
+import tempfile
 import threading
 import time
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -106,6 +108,61 @@ class CommunityStore:
             conn.commit()
             self._ready = True
         return conn
+
+
+def describe_storage(path: Path, configured: bool, env: "os._Environ[str] | dict[str, str] | None" = None, tmp_roots: tuple[str, ...] | None = None) -> dict:
+    """What kind of place is the Community DB on, and does it survive a redeploy?
+
+    COMMUNITY_DB_PATH being set proves nothing: it may still point into the container's ephemeral filesystem.
+    A path counts as persistent only when it is inside Railway's volume mount (RAILWAY_VOLUME_MOUNT_PATH) or on a
+    different device than the container root (a mounted volume). Paths are never returned, only their type.
+    """
+    env = os.environ if env is None else env
+    try:
+        resolved = Path(path).resolve()
+    except OSError:
+        resolved = Path(path)
+    roots = tmp_roots if tmp_roots is not None else tuple({"/tmp", "/var/tmp", tempfile.gettempdir()})
+
+    def inside(child: Path, parent: Path) -> bool:
+        try:
+            child.relative_to(parent)
+            return True
+        except ValueError:
+            return False
+
+    kind = "custom-unmounted" if configured else "default"
+    if resolved == DEFAULT_DB_PATH.resolve():
+        kind = "default"
+    elif any(inside(resolved, Path(root).resolve()) for root in roots):
+        kind = "tmp"
+    else:
+        volume = env.get("RAILWAY_VOLUME_MOUNT_PATH")
+        if volume and inside(resolved, Path(volume).resolve()):
+            kind = "volume"
+        else:
+            ancestor = resolved.parent
+            while not ancestor.exists() and ancestor != ancestor.parent:
+                ancestor = ancestor.parent
+            try:
+                if ancestor != Path(ancestor.anchor) and ancestor.stat().st_dev != Path(ancestor.anchor).stat().st_dev:
+                    kind = "volume"
+            except OSError:
+                pass
+    writable = False
+    try:
+        probe = resolved.parent
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        writable = os.access(probe, os.W_OK)
+    except OSError:
+        pass
+    return {
+        "communityDbConfigured": configured,
+        "communityDbPathType": kind,
+        "communityPersistentStorage": kind == "volume" and writable,
+        "communityDbWritable": writable,
+    }
 
 
 store = CommunityStore(Path(os.getenv("COMMUNITY_DB_PATH", str(DEFAULT_DB_PATH))))
@@ -282,7 +339,10 @@ def _validate_payload(body: bytes) -> dict:
         "artist": _text(chart.get("artist"), "아티스트", 200, required=False) or "",
         "bpm": float(chart_bpm), "offset": float(offset), "difficulty": difficulty, "level": level, "notes": notes,
     }
-    content_hash = hashlib.sha256(json.dumps([platform, difficulty, notes], separators=(",", ":")).encode()).hexdigest()
+    identity = _song_identity(fingerprint, song_original or song_title, float(duration), float(bpm))
+    content_hash = hashlib.sha256(
+        json.dumps([2, identity, platform, difficulty, notes], ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
     last_note = max(n["time"] + n.get("duration", 0.0) for n in notes)
     return {
         "author_id": author_id.lower(), "secret": secret, "chart_version": chart_version,
@@ -293,6 +353,14 @@ def _validate_payload(body: bytes) -> dict:
         "platform": platform, "scoring_version": scoring, "note_count": len(notes), "last_note_sec": round(last_note, 4),
         "content_hash": content_hash, "chart_json": json.dumps(clean_chart, ensure_ascii=False, separators=(",", ":")),
     }
+
+
+def _song_identity(fingerprint: str | None, title: str, duration: float, bpm: float) -> list:
+    """Stable song identity for duplicate detection: the fingerprint when present, otherwise normalized title/duration/BPM."""
+    if fingerprint:
+        return ["fp", fingerprint.lower()]
+    normalized = " ".join(unicodedata.normalize("NFKC", title).casefold().split())
+    return ["meta", normalized, round(duration, 1), round(bpm, 1)]
 
 
 def _summary(row: sqlite3.Row) -> dict:

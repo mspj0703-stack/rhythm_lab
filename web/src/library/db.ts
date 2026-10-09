@@ -339,6 +339,8 @@ export interface SaveEditedChartInput {
   chartId?: string;
   /** Create a new MANUAL_EDITED chart derived from this chart (AI original, Community or another edit). */
   parentChartId?: string;
+  /** Create a new MANUAL_EDITED chart from an in-memory blank draft (no parent; needs at least one note). */
+  draft?: LibraryChart;
   notes: readonly ChartNote[];
   authorId: string;
   label?: string;
@@ -374,6 +376,25 @@ export async function saveEditedChart(input: SaveEditedChartInput): Promise<Libr
       };
       charts.put(updated);
       return updated;
+    }
+    if (input.draft) {
+      const draft = input.draft;
+      if (draft.songId !== song.id) throw new Error("새 채보의 곡 정보가 올바르지 않습니다.");
+      if (notes.length === 0) throw new Error("노트를 하나 이상 추가한 뒤 저장해 주세요.");
+      const id = uuid("chart");
+      const chart: Chart = { ...draft.chart, notes };
+      assertStorableChart(chart);
+      const variantKey = chartVariantKey(draft.difficulty, draft.chart.platformProfile);
+      const created: LibraryChart = {
+        id, songId: song.id, difficulty: draft.difficulty.toLowerCase(), level: draft.level,
+        variantKey, slotKey: `${variantKey}:edit:${id}`, platformProfile: draft.chart.platformProfile,
+        scoringVersion: draft.chart.scoringVersion ?? 2, noteCount: notes.length, chart,
+        generatorVersion: draft.generatorVersion, seed: draft.seed, createdAt: now, updatedAt: now,
+        origin: "MANUAL_EDITED", chartVersion: 1, cloudPublished: false, authorId: input.authorId,
+        label: input.label?.trim() || draft.label || labelForDifficulty(draft.difficulty, "새 채보"),
+      };
+      charts.put(created);
+      return created;
     }
     if (!input.parentChartId) throw new Error("편집할 원본 채보가 필요합니다.");
     const parent = await requestToPromise(charts.get(input.parentChartId)) as LibraryChart | undefined;

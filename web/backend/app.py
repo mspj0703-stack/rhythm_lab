@@ -28,8 +28,10 @@ from chartgen.config import DIFFICULTIES
 from chartgen.pipeline import generate_chart
 
 try:  # `backend.app` in the container, plain `app` when tests import it from web/backend
+    from . import community
     from .community import router as community_router
 except ImportError:
+    import community
     from community import router as community_router
 
 RUNTIME = ROOT / ".runtime"
@@ -220,8 +222,9 @@ def health() -> dict:
         "maxUploadMb": MAX_UPLOAD_MB,
         "maxAudioDurationSec": MAX_AUDIO_DURATION_SEC,
         "youtubePotProvider": bool(YTDLP_POT_PROVIDER_URL),
-        # Community charts need COMMUNITY_DB_PATH on a persistent volume; the default path is ephemeral.
-        "communityPersistentStorage": bool(os.getenv("COMMUNITY_DB_PATH")),
+        # Community charts need the DB on a persistent volume. Judged from the real DB location, not from the
+        # mere presence of COMMUNITY_DB_PATH (see community.describe_storage).
+        **community.describe_storage(community.store.path, bool(os.getenv("COMMUNITY_DB_PATH"))),
     }
 
 

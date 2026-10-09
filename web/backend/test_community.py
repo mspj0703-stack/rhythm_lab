@@ -121,6 +121,39 @@ def test_duplicate_upload_conflicts():
     assert upload().status_code == 409
 
 
+def _song_payload(fingerprint, title="Song", original=None, duration=30.0, bpm=120.0):
+    body = payload()
+    song = {"title": title, "durationSec": duration, "bpm": bpm}
+    if original:
+        song["originalTitle"] = original
+    if fingerprint:
+        song["fingerprint"] = fingerprint
+    body["song"] = song
+    return body
+
+
+def test_same_notes_on_different_songs_are_both_accepted():
+    assert upload(_song_payload("v2:" + "a" * 64)).status_code == 200
+    assert upload(_song_payload("v2:" + "b" * 64)).status_code == 200
+
+
+def test_same_song_same_notes_conflicts_by_fingerprint():
+    assert upload(_song_payload("v2:" + "c" * 64)).status_code == 200
+    assert upload(_song_payload("v2:" + "c" * 64, title="Renamed")).status_code == 409
+
+
+def test_without_fingerprint_different_songs_are_not_deduplicated():
+    assert upload(_song_payload(None, title="Song A", duration=30.0)).status_code == 200
+    assert upload(_song_payload(None, title="Song B", duration=30.0)).status_code == 200      # other title
+    assert upload(_song_payload(None, title="Song A", duration=95.0)).status_code == 200      # other length
+    assert upload(_song_payload(None, title="Song A", duration=30.0, bpm=150.0)).status_code == 200  # other BPM
+
+
+def test_without_fingerprint_the_same_song_still_conflicts():
+    assert upload(_song_payload(None, title="Song  A ", duration=30.04)).status_code == 200
+    assert upload(_song_payload(None, title="song a", duration=30.0)).status_code == 409      # whitespace/case/rounding normalized
+
+
 def _upload_variant(title, difficulty, platform, song_title, lane_shift=0):
     body = payload(title=title)
     body["song"]["title"] = song_title
@@ -217,3 +250,37 @@ def test_master_alias_maps_to_internal_extreme():
     assert item["difficulty"] == "extreme"
     assert [i["cloudChartId"] for i in client.get("/api/community/charts", params={"difficulty": "master"}).json()["items"]] == [item["cloudChartId"]]
     assert [i["cloudChartId"] for i in client.get("/api/community/charts", params={"difficulty": "extreme"}).json()["items"]] == [item["cloudChartId"]]
+
+
+# ---- /api/health persistence reporting ----
+def test_storage_default_path_is_not_persistent():
+    info = community.describe_storage(community.DEFAULT_DB_PATH, False)
+    assert info == {"communityDbConfigured": False, "communityDbPathType": "default", "communityPersistentStorage": False, "communityDbWritable": info["communityDbWritable"]}
+
+
+def test_env_var_alone_does_not_mean_persistent(tmp_path):
+    # Configured, but pointing at the container's temp area: still ephemeral.
+    info = community.describe_storage(tmp_path / "community.sqlite3", True)
+    assert info["communityDbConfigured"] is True and info["communityDbPathType"] == "tmp" and info["communityPersistentStorage"] is False
+    # Configured at an ordinary directory of the container filesystem (no volume, no env marker).
+    info = community.describe_storage(tmp_path / "data" / "c.sqlite3", True, env={}, tmp_roots=())
+    assert info["communityDbPathType"] == "custom-unmounted" and info["communityPersistentStorage"] is False
+
+
+def test_railway_volume_mount_is_persistent(tmp_path):
+    volume = tmp_path / "vol"
+    volume.mkdir()
+    info = community.describe_storage(volume / "community.sqlite3", True, env={"RAILWAY_VOLUME_MOUNT_PATH": str(volume)}, tmp_roots=())
+    assert info["communityDbPathType"] == "volume" and info["communityPersistentStorage"] is True and info["communityDbWritable"] is True
+    # A path outside the mount with the same env var is not covered by the volume.
+    outside = community.describe_storage(tmp_path / "other" / "c.sqlite3", True, env={"RAILWAY_VOLUME_MOUNT_PATH": str(volume)}, tmp_roots=())
+    assert outside["communityPersistentStorage"] is False
+
+
+def test_health_reports_storage_without_leaking_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMMUNITY_DB_PATH", str(tmp_path / "c.sqlite3"))
+    body = client.get("/api/health").json()
+    for key in ("communityDbConfigured", "communityDbPathType", "communityPersistentStorage", "communityDbWritable"):
+        assert key in body
+    assert body["communityDbConfigured"] is True and body["communityPersistentStorage"] is False
+    assert str(tmp_path) not in json.dumps(body)

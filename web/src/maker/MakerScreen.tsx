@@ -33,6 +33,8 @@ interface Props {
   preferences: Preferences;
   onExit: () => void;
   onSaved: (chart: LibraryChart) => void;
+  /** `source` is an in-memory blank draft (see blank.ts): saving creates a brand new user chart without a parent. */
+  blank?: boolean;
 }
 
 const LANE_LABELS = ["D", "F", "J", "K"] as const;
@@ -57,13 +59,14 @@ interface DragState {
   moved: boolean;
 }
 
-export function MakerScreen({ bundle, source, media, noteSpeed, timingOffsetMs, audioSettings, preferences, onExit, onSaved }: Props) {
+export function MakerScreen({ bundle, source, media, noteSpeed, timingOffsetMs, audioSettings, preferences, onExit, onSaved, blank = false }: Props) {
   const platform = source.chart.platformProfile;
   const flickOk = flickAllowed(platform);
   const parentNotes = useMemo(() => {
+    if (blank) return null;
     if (source.origin !== "MANUAL_EDITED") return source.chart.notes;
     return bundle.charts.find((chart) => chart.id === source.parentChartId)?.chart.notes ?? null;
-  }, [bundle.charts, source]);
+  }, [bundle.charts, source, blank]);
 
   const [history, setHistory] = useState<EditorHistory>(() => createHistory(fromChartNotes(source.chart.notes)));
   const [preview, setPreview] = useState<EditorState | null>(null);
@@ -76,7 +79,7 @@ export function MakerScreen({ bundle, source, media, noteSpeed, timingOffsetMs, 
   const [playing, setPlaying] = useState(false);
   const [follow, setFollow] = useState(true);
   const [mediaDuration, setMediaDuration] = useState(0);
-  const [savedChart, setSavedChart] = useState<LibraryChart | null>(source.origin === "MANUAL_EDITED" ? source : null);
+  const [savedChart, setSavedChart] = useState<LibraryChart | null>(!blank && source.origin === "MANUAL_EDITED" ? source : null);
   const [savedNotes, setSavedNotes] = useState(() => source.chart.notes);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -285,6 +288,7 @@ export function MakerScreen({ bundle, source, media, noteSpeed, timingOffsetMs, 
 
   async function save() {
     if (saving) return;
+    if (blank && !savedChart && chartNotes.length === 0) { setError("노트를 하나 이상 추가한 뒤 저장해 주세요."); return; }
     if (sameAsParent) { setError("원본과 같은 채보입니다. 노트를 수정한 뒤 저장해 주세요."); return; }
     if (!validation.ok && !window.confirm(`ERROR ${validation.errors}개가 있습니다. 이 상태로는 공유할 수 없지만 로컬에는 저장할 수 있습니다. 저장할까요?`)) return;
     setSaving(true); setError(null);
@@ -292,7 +296,8 @@ export function MakerScreen({ bundle, source, media, noteSpeed, timingOffsetMs, 
       const saved = await saveEditedChart({
         songId: bundle.song.id,
         chartId: savedChart?.id,
-        parentChartId: savedChart ? undefined : source.id,
+        parentChartId: savedChart || blank ? undefined : source.id,
+        draft: blank && !savedChart ? source : undefined,
         notes: chartNotes,
         authorId: getAuthorIdentity().authorId,
       });

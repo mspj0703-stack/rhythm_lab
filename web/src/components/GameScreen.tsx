@@ -151,6 +151,8 @@ export function GameScreen({
   const [mvChoice, setMvChoice] = useState<{ reason: string; slow: boolean } | null>(null);
   /** Per-pointer touch input; never a single global "pressed" flag. */
   const tracker = useRef(new PointerLaneTracker());
+  /** pointerId -> lane button that successfully captured it (used to detect a lost capture before resuming). */
+  const capturedPointers = useRef(new Map<number, HTMLElement>());
   /** Lane keys physically held (kept even while paused, for the resume Hold policy). */
   const keyLanes = useRef(new Set<Lane>());
   /** noteIndex -> pointerId that started the Hold (diagnostics; release ownership lives in the tracker). */
@@ -310,15 +312,23 @@ export function GameScreen({
     pausedRef.current = true;
     setPaused(true);
     pauseVideo(mediaRef.current);
-    // The game state freezes as-is (Holds stay "holding", no Miss); only the physical pointers are dropped.
-    // resumeHolds() decides what happens to those Holds when play actually resumes.
+    // The game state freezes as-is (Holds stay "holding", no Miss). Physical pointers are NOT dropped: the lane
+    // buttons stay mounted under the overlay and every touch is pointer-captured by its lane button, so
+    // pointerup/pointercancel still arrive while paused and keep the tracker truthful. Gameplay actions are
+    // gated by inputLive(); resumeHolds() later reads which lanes are still physically held.
     if (resumeTimer.current !== null) { window.clearInterval(resumeTimer.current); resumeTimer.current = null; }
     setResumeCountdown(null);
     bufferingRef.current = false;
     setBuffering(false);
-    tracker.current.reset();
-    setPressedLanes([false, false, false, false]);
   }, [cancelMediaRecovery]);
+
+  /** Window lost focus / page hidden: pointer events are unreliable now, so forget every touch (Holds get the resume re-grab window). */
+  const dropPhysicalPointers = useCallback(() => {
+    tracker.current.reset();
+    capturedPointers.current.clear();
+    holdOwners.current.clear();
+    setPressedLanes(LANE_LIST.map((lane) => keyLanes.current.has(lane)));
+  }, []);
 
   /** Leave a failed source exactly once and continue with the next audio-only candidate. */
   const advanceSource = useCallback((reason: string, resume: boolean): boolean => {
@@ -448,7 +458,15 @@ export function GameScreen({
       resumeTimer.current = null;
       setResumeCountdown(null);
       const t = applyTimingOffsetSec(getCurrentTimeSec(mediaRef.current), lockedTimingOffsetMs);
+      // A pointer that lost its capture without an end event is a ghost: drop it so no lane stays stuck.
+      for (const [pointerId, element] of capturedPointers.current) {
+        if (typeof element.hasPointerCapture === "function" && !element.hasPointerCapture(pointerId)) {
+          tracker.current.end(pointerId);
+          capturedPointers.current.delete(pointerId);
+        }
+      }
       const pressed = heldLanes();
+      setPressedLanes(LANE_LIST.map((lane) => pressed.includes(lane)));
       setState((s) => resumeHolds(s, t, pressed));
       void startMedia();
     }, COUNTDOWN_STEP_MS);
@@ -466,7 +484,7 @@ export function GameScreen({
   useEffect(() => {
     const freeze = () => {
       if (songEnded || showResult) return;
-      if (gameStarted) { pauseGame(); return; }
+      if (gameStarted) { pauseGame(); dropPhysicalPointers(); return; }
       startupGeneration.current++;
       setLifecycleBlocked(true);
       cancelPlayback();
@@ -493,7 +511,7 @@ export function GameScreen({
       window.removeEventListener("beatdash:pause", freeze);
       window.removeEventListener("beatdash:resume", resumeStartup);
     };
-  }, [gameStarted, songEnded, showResult, mediaPrepared, pauseGame, cancelPlayback]);
+  }, [gameStarted, songEnded, showResult, mediaPrepared, pauseGame, dropPhysicalPointers, cancelPlayback]);
 
 
   /** Judgement is live only while the song really plays (not paused, counting down or buffering). */
@@ -558,7 +576,7 @@ export function GameScreen({
   // ---- Touch: one PointerLaneTracker entry per pointerId (Hold ownership, per-pointer Flick) ----
   const onLanePointerDown = useCallback((lane: Lane, event: React.PointerEvent<HTMLElement>) => {
     event.preventDefault();
-    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* already captured / synthetic */ }
+    try { event.currentTarget.setPointerCapture(event.pointerId); capturedPointers.current.set(event.pointerId, event.currentTarget); } catch { /* already captured / synthetic */ }
     const actions = tracker.current.down(event.pointerId, lane, event.clientX, event.clientY, event.timeStamp);
     syncPressedLanes();
     // A finger on a lane already held by a key/finger still presses (Tap during that lane's Hold is a chart error).
@@ -574,6 +592,7 @@ export function GameScreen({
   const onLanePointerEnd = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.type === "pointerup") event.preventDefault();
     const actions = tracker.current.end(event.pointerId);
+    capturedPointers.current.delete(event.pointerId);
     syncPressedLanes();
     for (const action of actions) {
       if (action.type !== "release" || keyLanes.current.has(action.lane)) continue;
@@ -605,6 +624,7 @@ export function GameScreen({
     bufferingRef.current = false;
     setBuffering(false);
     tracker.current.reset();
+    capturedPointers.current.clear();
     holdOwners.current.clear();
     setState((s) => restartGame(s));
     setPaused(false);
@@ -633,6 +653,7 @@ export function GameScreen({
     startupGeneration.current++;
     if (resumeTimer.current !== null) { window.clearInterval(resumeTimer.current); resumeTimer.current = null; }
     tracker.current.reset();
+    capturedPointers.current.clear();
     holdOwners.current.clear();
     keyLanes.current.clear();
     pausedRef.current = true;
@@ -663,6 +684,7 @@ export function GameScreen({
   useEffect(() => {
     if (!state.finished) return;
     tracker.current.reset();
+    capturedPointers.current.clear();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   }, [state.finished]);
 

@@ -64,3 +64,10 @@
 | 항목 | 결과 | 기기 / 메모 |
 | --- | --- | --- |
 | (작성) | | |
+
+## 추가 (Final Fix)
+- [ ] Hold를 누른 채 Pause(시스템 Back) → 손가락을 계속 대고 있다가 3-2-1 후에도 Hold 유지 (400ms 재잡기에 의존하지 않음)
+- [ ] Pause 중 손가락을 뗐다가 재개 직후 다시 누르면 Hold 이어짐, 안 누르면 끊김
+- [ ] Hold + 다른 손가락 Tap/Flick 중 Pause → 재개 후 잠긴 레인(stuck) 없음
+- [ ] 알림창/전화 등으로 앱이 포커스를 잃은 뒤 복귀 → Pause 상태, 재개 후 다시 눌러야 Hold 이어짐
+- [ ] Song Detail "빈 채보로 새로 만들기": Mobile/Desktop × 난이도(MASTER 포함) → Maker 시작 → 노트 추가 → 저장 → 앱 재실행 후 존재 → TEST PLAY → Community 공유

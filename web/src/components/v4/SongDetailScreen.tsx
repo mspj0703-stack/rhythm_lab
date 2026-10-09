@@ -13,7 +13,7 @@ import { checkShareEligibility } from "../../community/share";
 import { shortAuthor } from "../../library/author";
 import { isAiOriginal } from "../../library/model";
 import "../../community/community.css";
-import { difficultyLabel } from "../../constants/difficulty";
+import { DIFFICULTY_OPTIONS, difficultyLabel } from "../../constants/difficulty";
 
 interface Props {
   bundle: LibraryBundle;
@@ -24,6 +24,8 @@ interface Props {
   onGenerateDifficulty: (difficulty: string, platform?: ChartPlatform) => Promise<void>;
   /** Opens the Maker for this chart (AI/Community charts are cloned on save, never overwritten). */
   onEdit?: (chart: LibraryChart) => void;
+  /** Starts the Maker with an empty chart on this (already saved) song. */
+  onCreateBlank?: (difficulty: string, platform: ChartPlatform) => void;
   onShare?: (chart: LibraryChart, description?: string) => Promise<void>;
   onDeleteChart?: (chart: LibraryChart) => Promise<void>;
   initialChartId?: string;
@@ -41,7 +43,7 @@ function shortClear(record: PlayRecord): string {
   return record.clearType === "PERFECT_COMBO" ? "PC" : record.clearType === "FULL_COMBO" ? "FC" : "CL";
 }
 
-export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, onGenerateDifficulty, onEdit, onShare, onDeleteChart, initialChartId }: Props) {
+export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, onGenerateDifficulty, onEdit, onCreateBlank, onShare, onDeleteChart, initialChartId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState(bundle.song.title);
   const [offset, setOffset] = useState(bundle.song.timingOffsetMs);
@@ -53,6 +55,8 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
   const [coverBusy, setCoverBusy] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
   const [platform, setPlatform] = useState(defaultChartPlatform);
+  const [blankPlatform, setBlankPlatform] = useState<ChartPlatform>(defaultChartPlatform);
+  const [blankDifficulty, setBlankDifficulty] = useState<string>("normal");
   const selected = useMemo(() => bundle.charts.find((chart) => chart.id === selectedId) ?? bundle.charts[0], [bundle.charts, selectedId]);
   // Only AI originals count: a Maker edit or Community download never hides the AI generator for that slot.
   const existingDifficulties = useMemo(() => new Set(bundle.charts.filter(chart => isAiOriginal(chart) && chart.chart.platformProfile === platform).map((chart) => chart.difficulty.toLowerCase())), [bundle.charts, platform]);
@@ -158,6 +162,14 @@ export function SongDetailScreen({ bundle, onBack, onPlay, onDelete, onChanged, 
 
       <section className="song-settings-panel"><div><span className="eyebrow">SONG OFFSET</span><h2>{offset > 0 ? "+" : ""}{offset} ms</h2><p>이 곡의 보정값을 전역 Offset에 더합니다. 최종 적용 범위는 −300~+300 ms입니다.</p></div><div className="song-offset-controls"><button onClick={() => void saveOffset(offset - 10)}>−10</button><input type="range" min={-300} max={300} step={1} value={offset} onChange={(e) => setOffset(Number(e.target.value))} onPointerUp={() => void saveOffset(offset)} onKeyUp={() => void saveOffset(offset)}/><button onClick={() => void saveOffset(offset + 10)}>+10</button><button className="reset-offset" onClick={() => void saveOffset(0)}>RESET</button></div></section>
 
+      {onCreateBlank && <section className="chart-generator-panel blank-chart-panel" aria-label="빈 채보로 새로 만들기">
+        <div><span className="eyebrow">MAKER</span><h2>빈 채보로 새로 만들기</h2><p>이 곡의 BPM·오프셋을 그대로 쓰고 노트 없이 시작합니다. AI 채보는 바뀌지 않으며, 저장하면 내 채보로 따로 추가됩니다.</p></div>
+        <div className="blank-chart-controls">
+          <select aria-label="새 채보 플랫폼" value={blankPlatform} onChange={(e) => setBlankPlatform(e.target.value as ChartPlatform)}><option value="mobile">Mobile</option><option value="desktop">Desktop</option></select>
+          <select aria-label="새 채보 난이도" value={blankDifficulty} onChange={(e) => setBlankDifficulty(e.target.value)}>{DIFFICULTY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+          <button disabled={Boolean(generating)} onClick={() => onCreateBlank(blankDifficulty, blankPlatform)}>빈 채보로 Maker 시작</button>
+        </div>
+      </section>}
       <ChartPlatformSelect value={platform} onChange={setPlatform} disabled={Boolean(generating)} />
       {missingDifficulties.length > 0 && <section className="chart-generator-panel"><div><span className="eyebrow">ADD CHART</span><h2>다른 난이도 생성</h2><p>저장된 미디어를 서버로 보내 새 난이도를 생성합니다. 네트워크 연결이 필요합니다.</p></div><div>{missingDifficulties.map((difficulty) => <button key={difficulty} disabled={Boolean(generating)} onClick={() => void generate(difficulty)}>{generating === difficulty ? "GENERATING…" : `＋ ${difficultyLabel(difficulty)}`}</button>)}</div></section>}
       {selected && isAiOriginal(selected) && <section className="chart-generator-panel"><div><h2>현재 채보 재생성</h2><p>노트가 바뀌면 새 채보 버전으로 기록을 시작합니다. 이전 기록은 보관됩니다. 기존 채보는 선택한 플랫폼의 새 채보로 생성합니다.</p></div><button disabled={Boolean(generating)} onClick={() => { if (window.confirm("현재 난이도를 다시 생성할까요?")) void generate(selected.difficulty, selected.chart.platformProfile ?? platform); }}>{generating === selected.difficulty ? "GENERATING…" : "REGENERATE"}</button></section>}
